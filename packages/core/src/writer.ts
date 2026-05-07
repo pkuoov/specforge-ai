@@ -51,6 +51,8 @@ function renderExpectation(
           return `    expect(typeof ${call}).toBe('number');`;
         case 'string-return':
           return `    expect(typeof ${call}).toBe('string');`;
+        case 'array-return':
+          return `    expect(Array.isArray(${call})).toBe(true);`;
         case 'length-preserving':
           return `    expect(Array.isArray(${call})).toBe(true);`;
         default:
@@ -127,6 +129,33 @@ function renderPropertyExpectation(tc: TestCase, sig: FunctionSignature): string
       return [
         `    const result = ${call};`,
         `    expect(typeof result).toBe('string');`,
+      ].join('\n');
+
+    case 'json-string':
+      return [
+        `    const result = ${call};`,
+        `    expect(typeof result).toBe('string');`,
+        `    expect(() => JSON.parse(result)).not.toThrow();`,
+      ].join('\n');
+
+    case 'email-string':
+      return [
+        `    const result = ${call};`,
+        `    expect(typeof result).toBe('string');`,
+        `    expect(result).toContain('@');`,
+      ].join('\n');
+
+    case 'url-string':
+      return [
+        `    const result = ${call};`,
+        `    expect(typeof result).toBe('string');`,
+        `    expect(() => new URL(result)).not.toThrow();`,
+      ].join('\n');
+
+    case 'array-return':
+      return [
+        `    const result = ${call};`,
+        `    expect(Array.isArray(result)).toBe(true);`,
       ].join('\n');
 
     case 'date-return':

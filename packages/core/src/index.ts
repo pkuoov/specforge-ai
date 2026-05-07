@@ -89,6 +89,7 @@ export async function runTestgen(
   }
 
   const importPath = toImportPath(testDir, absolutePath);
+  const testFileExists = existsSync(testFilePath);
   const plans = sigs.map((sig) =>
     generateTestPlan(sig, importPath, {
       invalidInputStrategy: opts.invalidInputStrategy,
@@ -96,17 +97,31 @@ export async function runTestgen(
   );
   const testSource = renderTestFile(plans, sigs, importPath);
   const outputSource = opts.merge
-    ? existsSync(testFilePath)
+    ? testFileExists
       ? mergeGeneratedTestSource(readFileSync(testFilePath, 'utf-8'), testSource)
       : wrapGeneratedTestSource(testSource)
     : testSource;
+  const writeAction = opts.merge
+    ? testFileExists
+      ? 'updated generated block in'
+      : 'created generated block in'
+    : testFileExists && opts.overwrite
+      ? 'overwrote'
+      : 'wrote';
+  const dryRunAction = opts.merge
+    ? testFileExists
+      ? 'update generated block in'
+      : 'create generated block in'
+    : testFileExists && opts.overwrite
+      ? 'overwrite'
+      : 'write';
 
   if (!opts.dryRun) {
     mkdirSync(testDir, { recursive: true });
     writeFileSync(testFilePath, outputSource, 'utf-8');
-    console.log(`testgen: wrote ${testFilePath}`);
+    console.log(`testgen: ${writeAction} ${testFilePath}`);
   } else {
-    console.log(`testgen (dry-run): would write ${testFilePath}`);
+    console.log(`testgen (dry-run): would ${dryRunAction} ${testFilePath}`);
     console.log(outputSource);
     return buildReport(sourceFilePath, []);
   }

@@ -218,4 +218,48 @@ describe('renderTestFile', () => {
     expect(source).not.toContain('formatDate(once as any)');
     expect(source).not.toContain('expect(result instanceof Date).toBe(true);');
   });
+
+  it('renders project-local fixture values and additional domain contracts', () => {
+    const sigs: FunctionSignature[] = [
+      {
+        name: 'summarizeUser',
+        params: [
+          {
+            name: 'user',
+            type: 'User',
+            optional: false,
+            fixtureValue: {
+              id: 'abc-123',
+              email: 'alice@example.com',
+              active: true,
+            },
+          },
+        ],
+        returnType: 'string',
+        isAsync: false,
+        isExported: true,
+      },
+      {
+        name: 'toJson',
+        params: [{ name: 'user', type: 'User', optional: false }],
+        returnType: 'string',
+        isAsync: false,
+        isExported: true,
+      },
+      {
+        name: 'findUsers',
+        params: [{ name: 'query', type: 'string', optional: false }],
+        returnType: 'User[]',
+        isAsync: false,
+        isExported: true,
+      },
+    ];
+    const plans = sigs.map((sig) => generateTestPlan(sig, './domain', { invalidInputStrategy: 'skip' }));
+    const source = renderTestFile(plans, sigs, './domain');
+
+    expect(source).toContain('summarizeUser({ id: "abc-123", email: "alice@example.com", active: true })');
+    expect(source).toContain('expect(() => JSON.parse(result)).not.toThrow();');
+    expect(source).toContain('returns an array result');
+    expect(source).toContain('expect(Array.isArray(result)).toBe(true);');
+  });
 });

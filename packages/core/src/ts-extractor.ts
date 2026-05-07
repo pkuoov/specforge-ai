@@ -35,6 +35,62 @@ function typeToString(ts: TS, type: TypeScript.Type, checker: TypeScript.TypeChe
   );
 }
 
+function primitiveFixtureForType(typeName: string, paramName: string): unknown {
+  const normalized = typeName.toLowerCase();
+  const compact = normalized.replace(/\s/g, '');
+  const name = paramName.toLowerCase();
+
+  if (compact.startsWith('{')) return undefined;
+  if (compact.includes('[]') || compact.includes('array')) return [1, 2, 3];
+  if (/\bdate\b/.test(normalized)) return '2024-01-02T00:00:00.000Z';
+  if (/\bstring\b/.test(normalized)) {
+    if (name.includes('email')) return 'alice@example.com';
+    if (name.includes('url')) return 'https://example.com';
+    if (name.includes('id')) return 'abc-123';
+    if (name.includes('name') || name.includes('title')) return 'Alice';
+    return 'hello';
+  }
+  if (/\bnumber\b/.test(normalized)) {
+    if (name.includes('min')) return 0;
+    if (name.includes('max')) return 100;
+    if (name.includes('count') || name.includes('total') || name.includes('size')) return 5;
+    return 42;
+  }
+  if (/\bboolean\b/.test(normalized)) return true;
+  return undefined;
+}
+
+function fixtureFromType(
+  ts: TS,
+  type: TypeScript.Type,
+  checker: TypeScript.TypeChecker,
+  paramName: string,
+  depth = 0
+): unknown {
+  if (depth > 2) return undefined;
+
+  const typeName = typeToString(ts, type, checker);
+  const primitive = primitiveFixtureForType(typeName, paramName);
+  if (primitive !== undefined) return primitive;
+
+  const properties = checker.getPropertiesOfType(type);
+  if (properties.length === 0 || properties.length > 12) return undefined;
+
+  const fixture: Record<string, unknown> = {};
+  for (const property of properties) {
+    const declaration = property.valueDeclaration ?? property.declarations?.[0];
+    if (!declaration) continue;
+    const propertyType = checker.getTypeOfSymbolAtLocation(property, declaration);
+    const propertyTypeName = typeToString(ts, propertyType, checker);
+    const value =
+      primitiveFixtureForType(propertyTypeName, property.name) ??
+      fixtureFromType(ts, propertyType, checker, property.name, depth + 1);
+    if (value !== undefined) fixture[property.name] = value;
+  }
+
+  return Object.keys(fixture).length > 0 ? fixture : undefined;
+}
+
 function literalValueFromExpression(ts: TS, node: TypeScript.Expression | undefined): unknown {
   if (!node) return undefined;
   if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) return node.text;
@@ -76,12 +132,14 @@ function extractParams(
     const optional = !!p.questionToken || !!p.initializer;
     const type = checker.getTypeAtLocation(p);
     const defaultValue = p.initializer ? p.initializer.getText() : undefined;
+    const fixtureValue = fixtureFromType(ts, type, checker, name);
 
     return {
       name,
       type: typeToString(ts, type, checker),
       optional,
       defaultValue,
+      fixtureValue,
     };
   });
 }
@@ -181,6 +239,7 @@ function signatureFromFunctionLike(
     importName: string;
     exportKind: 'named' | 'default';
     callExpression?: string;
+    overloadIndex?: number;
     jsdocNode: TypeScript.Node;
   }
 ): FunctionSignature {
@@ -196,6 +255,7 @@ function signatureFromFunctionLike(
     importName: options.importName,
     exportKind: options.exportKind,
     callExpression: options.callExpression,
+    overloadIndex: options.overloadIndex,
     literalReturnValue: literalReturnValueFromBody(ts, fn.body),
     params: extractParams(ts, fn.parameters, checker),
     returnType: returnType.replace(/\s+/g, ' ').trim(),
@@ -250,6 +310,12 @@ function extractFromObjectLiteral(
   return results;
 }
 
+function staticMethodName(ts: TS, member: TypeScript.ClassElement): string | undefined {
+  if (!ts.isMethodDeclaration(member)) return undefined;
+  if (!hasModifier(ts, member, ts.SyntaxKind.StaticKeyword)) return undefined;
+  return propertyNameToString(ts, member.name);
+}
+
 function extractFromClassDeclaration(
   ts: TS,
   node: TypeScript.ClassDeclaration,
@@ -262,18 +328,35 @@ function extractFromClassDeclaration(
   if (!isNodeExported(ts, node) && !exportedNames.has(className)) return [];
   const exportKind = defaultExport ? 'default' : 'named';
   const results: FunctionSignature[] = [];
+  const overloadedMethods = new Set<string>();
+  const overloadIndexes = new Map<string, number>();
 
   for (const member of node.members) {
     if (!ts.isMethodDeclaration(member)) continue;
-    if (!hasModifier(ts, member, ts.SyntaxKind.StaticKeyword)) continue;
-    const methodName = propertyNameToString(ts, member.name);
+    const methodName = staticMethodName(ts, member);
+    if (!methodName || member.body) continue;
+    overloadedMethods.add(methodName);
+  }
+
+  for (const member of node.members) {
+    if (!ts.isMethodDeclaration(member)) continue;
+    const methodName = staticMethodName(ts, member);
     if (!methodName) continue;
+    if (overloadedMethods.has(methodName) && member.body) continue;
+    const overloadIndex = overloadedMethods.has(methodName)
+      ? (overloadIndexes.get(methodName) ?? 0) + 1
+      : undefined;
+    if (overloadIndex !== undefined) overloadIndexes.set(methodName, overloadIndex);
     results.push(
       signatureFromFunctionLike(ts, member, checker, {
-        name: `${className}.${methodName}`,
+        name:
+          overloadIndex !== undefined
+            ? `${className}.${methodName} overload ${overloadIndex}`
+            : `${className}.${methodName}`,
         importName: className,
         exportKind,
         callExpression: `${className}.${methodName}`,
+        overloadIndex,
         jsdocNode: member,
       })
     );

@@ -71,6 +71,21 @@ describe('runTestgen', () => {
     expect(output.trimEnd().endsWith('// </testgen:generated>')).toBe(true);
   });
 
+  it('describes merge dry-runs as create or update actions', async () => {
+    const sourcePath = createTempSource();
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+
+    await runTestgen(sourcePath, { dryRun: true, merge: true });
+    expect(log.mock.calls.flat().join('\n')).toContain('would create generated block in');
+
+    writeFileSync(sourcePath.replace(/\.ts$/, '.test.ts'), '// <testgen:generated>\nold\n// </testgen:generated>\n');
+    log.mockClear();
+
+    await runTestgen(sourcePath, { dryRun: true, merge: true });
+    expect(log.mock.calls.flat().join('\n')).toContain('would update generated block in');
+    log.mockRestore();
+  });
+
   it('uses TypeScript AST extraction in auto mode before falling back to regex', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'testgen-core-'));
     const sourcePath = join(dir, 'fn-expression.ts');

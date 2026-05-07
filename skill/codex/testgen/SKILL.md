@@ -76,16 +76,15 @@ Behavioral mirror examples:
 - Never swallow boundary or error-path failures just to keep generated tests green.
 - Prefer observable behavior over implementation details.
 - If Vitest is missing, surface the install command and clearly state that validation did not run.
-- Treat React components, API routes, Jest/Bun/Node runner support, and `testgen.config.ts` as future P1/P2 work unless the repo has implemented them.
+- Treat React components, API routes, Jest/Bun/Node runner support, mutation testing, coverage delta, and `testgen.config.ts` as future P2 work unless the repo has implemented them.
 
 ## Current Phase
 
-P0 is complete. P1 is mostly complete: single-file and directory generation, JSON config, overwrite protection, safe merge blocks, AST-first extraction with regex fallback, default function exports, default class static methods, cross-file named and namespace re-exports, top-level overload signatures, namespace functions, object-exported functions, simple JSDoc/literal expected values, inline object and common domain-shaped fixtures, real runner results, invalid-input policies, and expanded behavioral contracts are implemented.
+P0 and P1 are complete: single-file and directory generation, JSON config, overwrite protection, safe merge blocks with create/update/overwrite status messages, AST-first extraction with regex fallback, default function exports, default class static methods, cross-file named and namespace re-exports, top-level and class static overload signatures, namespace functions, object-exported functions, simple JSDoc/literal expected values, inline object/project-local type/interface/common domain-shaped fixtures, real runner results, invalid-input policies, and expanded behavioral contracts are implemented.
 
 Next planned work:
 
-- P1 remaining: project-local type/interface fixture extraction, class/interface overload forms, additional domain utility contracts, and generated-region update UX refinements.
-- P2 remaining: React/API route generation, Jest/Bun/Node runner support, mutation testing, coverage delta, and `testgen.config.ts`. CI, public audit, dogfood generation, and package pack checks are implemented.
+- P2 remaining: React/API route generation, instance method generation, Jest/Bun/Node runner support, mutation testing, coverage delta, and `testgen.config.ts`. CI, public audit, dogfood generation, and package pack checks are implemented.
 
 ## Dependency Hint
 

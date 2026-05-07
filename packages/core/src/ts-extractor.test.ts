@@ -159,4 +159,64 @@ describe('extractFunctionsFromTypeScript', () => {
     expect(sigs.map((sig) => sig.params[0]?.type)).toEqual(['string', 'number']);
     expect(sigs.map((sig) => sig.overloadIndex)).toEqual([1, 2]);
   });
+
+  it('extracts fixture values from local interface and type fields', async () => {
+    const sourcePath = writeTempSource(`
+      interface User {
+        id: string;
+        email: string;
+        active: boolean;
+        profile: {
+          name: string;
+          visitCount: number;
+        };
+      }
+
+      type Options = {
+        retries: number;
+        enabled: boolean;
+      };
+
+      export function summarizeUser(user: User, options: Options): string {
+        return user.email;
+      }
+    `);
+
+    const sigs = await extractFunctionsFromTypeScript(sourcePath);
+
+    expect(sigs[0]?.params[0]?.fixtureValue).toEqual({
+      id: 'abc-123',
+      email: 'alice@example.com',
+      active: true,
+      profile: {
+        name: 'Alice',
+        visitCount: 5,
+      },
+    });
+    expect(sigs[0]?.params[1]?.fixtureValue).toEqual({
+      retries: 42,
+      enabled: true,
+    });
+  });
+
+  it('extracts class static overload signatures as separate cases', async () => {
+    const sourcePath = writeTempSource(`
+      export class Parser {
+        static parse(value: string): number;
+        static parse(value: number): number;
+        static parse(value: string | number): number {
+          return Number(value);
+        }
+      }
+    `);
+
+    const sigs = await extractFunctionsFromTypeScript(sourcePath);
+
+    expect(sigs.map((sig) => sig.name)).toEqual([
+      'Parser.parse overload 1',
+      'Parser.parse overload 2',
+    ]);
+    expect(sigs.map((sig) => sig.callExpression)).toEqual(['Parser.parse', 'Parser.parse']);
+    expect(sigs.map((sig) => sig.params[0]?.type)).toEqual(['string', 'number']);
+  });
 });

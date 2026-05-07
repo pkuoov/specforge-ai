@@ -13,6 +13,7 @@ export interface FunctionParam {
   type: string;
   optional: boolean;
   defaultValue?: string | undefined;
+  fixtureValue?: unknown;
 }
 
 export interface FunctionSignature {

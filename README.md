@@ -44,16 +44,16 @@ testgen is currently usable as a P0 autotest assistant for exported TypeScript/J
 - It supports invalid-input policy selection with `no-throw`, `throw`, or `skip`.
 - It prefers TypeScript AST extraction when TypeScript is available, then falls back to regex extraction.
 - It can merge generated output into a protected `// <testgen:generated>` block with `--merge`.
-- It supports default function exports, default class static methods, local export specifiers, cross-file named re-exports, namespace re-exports, top-level overload signatures, namespace functions, class static methods, and object-exported functions in AST mode.
-- It includes behavioral contracts for predicates, validators, parse/get/date/format/create helpers, grouping helpers, uniqueness helpers, and min/max/average utilities.
+- It supports default function exports, default class static methods, local export specifiers, cross-file named re-exports, namespace re-exports, top-level and class static overload signatures, namespace functions, class static methods, and object-exported functions in AST mode.
+- It includes behavioral contracts for predicates, validators, parse/get/date/format/create helpers, JSON/email/URL helpers, grouping helpers, array-return helpers, uniqueness helpers, and min/max/average utilities.
 - It can turn simple JSDoc examples such as `@example add(1, 2) => 3` and literal returns such as `return 42` into concrete `toEqual` happy-path tests.
-- It generates simple object fixtures from inline object parameter types and common domain type names such as `User`, `Order`, `Config`, and `Date`.
+- It generates object fixtures from inline object parameter types, local `interface`/`type` fields, and common domain type names such as `User`, `Order`, `Config`, and `Date`.
 - It includes Claude Code and Codex skill definitions.
 - It includes CI checks for typecheck, tests, build, dogfood generation, public audit, and package pack checks.
 
 Known limits:
 
-- React components, API routes, class/interface overload forms, and complex module shapes need P1/P2 work.
+- React components, API routes, instance method generation, pure type-only interfaces without runtime exports, and complex module shapes need P2 work.
 - `testgen.config.ts` is not supported yet; config is JSON-only to avoid runtime loader dependencies.
 
 ---
@@ -282,7 +282,7 @@ Status: complete.
 
 ### P1 — Production-grade generated tests
 
-Status: in progress.
+Status: complete.
 
 - [x] Make the TypeScript AST extractor the default when TypeScript is available
 - [x] Add safe merge mode for existing tests instead of only skip/overwrite
@@ -296,8 +296,10 @@ Status: in progress.
 - [x] Add fixture generation for inline object parameters and common domain-shaped values
 - [x] Add generated-region update workflow through `--merge` markers
 - [x] Support top-level overload-specific cases and namespace re-export forms
-- [ ] Refine domain-shaped fixtures with project-local type/interface field extraction
-- [ ] Support class/interface overload forms
+- [x] Refine domain-shaped fixtures with project-local type/interface field extraction
+- [x] Support class static overload forms
+- [x] Add domain contracts for JSON/email/URL/array-return utility helpers
+- [x] Improve merge/update UX by reporting create vs update vs overwrite actions
 
 ### P2 — Broader framework and CI integration
 

@@ -49,16 +49,14 @@ node packages/core/bin/testgen.js examples/basic-function/clamp.ts --merge
 
 ## Current phase
 
-P0 is complete. P1 is mostly complete. Core and TypeScript packages are available. The core CLI writes standard Vitest tests, supports directory targets, respects JSON config, refuses overwrites by default, supports safe merge blocks, prefers TypeScript AST extraction when available, supports default function exports/default class static methods/cross-file named and namespace re-exports/top-level overload signatures/namespace functions/object-exported functions, uses simple JSDoc examples and literal returns as concrete expected values, generates inline object and common domain-shaped fixtures, and runs Vitest by default. The TypeScript package adds deeper AST extraction and fast-check property test generation.
+P0 and P1 are complete. Core and TypeScript packages are available. The core CLI writes standard Vitest tests, supports directory targets, respects JSON config, refuses overwrites by default, supports safe merge blocks with create/update/overwrite status messages, prefers TypeScript AST extraction when available, supports default function exports/default class static methods/cross-file named and namespace re-exports/top-level and class static overload signatures/namespace functions/object-exported functions, uses simple JSDoc examples and literal returns as concrete expected values, generates inline object, project-local type/interface, and common domain-shaped fixtures, and runs Vitest by default. The TypeScript package adds deeper AST extraction and fast-check property test generation.
 
 ## P1/P2 implementation queue
 
-P1 should finish the remaining production-grade generated-test refinements:
+P1 is complete. Preserve these boundaries when planning P2:
 
-1. Refine domain-shaped fixtures with project-local type/interface field extraction.
-2. Support class/interface overload forms.
-3. Expand behavioral contract patterns for additional domain utilities.
-4. Refine generated-region update UX beyond the current `--merge` marker workflow.
+1. Pure type-only interfaces do not have runtime exports, so they should inform fixtures but should not generate standalone tests.
+2. Instance method generation, React/API route generation, additional runners, mutation testing, and `testgen.config.ts` belong to P2.
 
 P2 should broaden integrations:
 

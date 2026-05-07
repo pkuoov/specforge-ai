@@ -1,4 +1,10 @@
-import type { FunctionSignature, InvalidInputStrategy, TestCase, TestPlan } from './types.js';
+import type {
+  FunctionParam,
+  FunctionSignature,
+  InvalidInputStrategy,
+  TestCase,
+  TestPlan,
+} from './types.js';
 
 const codeExpressionBrand = '__testgenExpression';
 
@@ -79,6 +85,11 @@ function happyValueForType(type: string, paramName: string): unknown {
   }
   if (t.includes('boolean')) return true;
   return {};
+}
+
+function happyValueForParam(param: FunctionParam): unknown {
+  if (param.fixtureValue !== undefined) return param.fixtureValue;
+  return happyValueForType(param.type, param.name);
 }
 
 function splitTopLevel(raw: string, separators: string[]): string[] {
@@ -274,7 +285,7 @@ function generateBoundaryCases(sig: FunctionSignature): TestCase[] {
   for (const param of sig.params) {
     for (const value of boundaryValuesForType(param.type)) {
       const inputs = sig.params.map((p) =>
-        p.name === param.name ? value : happyValueForType(p.type, p.name)
+        p.name === param.name ? value : happyValueForParam(p)
       );
       const label = value === null ? 'null' : value === undefined ? 'undefined' : String(value);
       cases.push({
@@ -293,7 +304,7 @@ function generateHappyPath(sig: FunctionSignature): TestCase[] {
   const example = exampleFromJsdoc(sig);
   if (example) return [example];
 
-  const inputs = sig.params.map((p) => happyValueForType(p.type, p.name));
+  const inputs = sig.params.map(happyValueForParam);
   if (sig.literalReturnValue !== undefined) {
     return [
       {
@@ -366,7 +377,7 @@ function generateBehavioralMirror(sig: FunctionSignature): TestCase[] {
     sig.params.map((p, index) =>
       Object.prototype.hasOwnProperty.call(overrides, index)
         ? overrides[index]
-        : happyValueForType(p.type, p.name)
+        : happyValueForParam(p)
     );
 
   if (name.includes('clamp') && sig.params.length >= 3) {
@@ -479,6 +490,33 @@ function generateBehavioralMirror(sig: FunctionSignature): TestCase[] {
     });
   }
 
+  if (name.includes('json') && ret.includes('string')) {
+    cases.push({
+      strategy: 'behavioral-mirror',
+      description: 'returns parseable JSON text',
+      inputs: inputsForBehavior(),
+      expectation: { type: 'property', pattern: 'json-string' },
+    });
+  }
+
+  if ((name.includes('email') || ret.includes('email')) && ret.includes('string')) {
+    cases.push({
+      strategy: 'behavioral-mirror',
+      description: 'returns an email-shaped string',
+      inputs: inputsForBehavior(),
+      expectation: { type: 'property', pattern: 'email-string' },
+    });
+  }
+
+  if ((name.includes('url') || name.includes('uri')) && ret.includes('string')) {
+    cases.push({
+      strategy: 'behavioral-mirror',
+      description: 'returns a URL-shaped string',
+      inputs: inputsForBehavior(),
+      expectation: { type: 'property', pattern: 'url-string' },
+    });
+  }
+
   // Non-negative numeric return
   if (
     (ret.includes('number') || ret === 'unknown') &&
@@ -489,6 +527,18 @@ function generateBehavioralMirror(sig: FunctionSignature): TestCase[] {
       description: 'returns a non-negative number',
       inputs: inputsForBehavior(),
       expectation: { type: 'property', pattern: 'non-negative' },
+    });
+  }
+
+  if (
+    ret.includes('number') &&
+    (name.includes('calculate') || name.includes('compute') || name.includes('score') || name.includes('price'))
+  ) {
+    cases.push({
+      strategy: 'behavioral-mirror',
+      description: 'returns a finite number',
+      inputs: inputsForBehavior(),
+      expectation: { type: 'property', pattern: 'number-return' },
     });
   }
 
@@ -537,6 +587,21 @@ function generateBehavioralMirror(sig: FunctionSignature): TestCase[] {
     });
   }
 
+  if (
+    ret.includes('[]') ||
+    ret.includes('array') ||
+    name.startsWith('list') ||
+    name.startsWith('find') ||
+    name.startsWith('search')
+  ) {
+    cases.push({
+      strategy: 'behavioral-mirror',
+      description: 'returns an array result',
+      inputs: inputsForBehavior(),
+      expectation: { type: 'property', pattern: 'array-return' },
+    });
+  }
+
   // Length-preserving for array operations
   if (hasArrayParam) {
     if (name.includes('filter')) {
@@ -547,12 +612,12 @@ function generateBehavioralMirror(sig: FunctionSignature): TestCase[] {
         expectation: { type: 'property', pattern: 'length-upper-bound' },
       });
     } else if (name.includes('sort') || name.includes('shuffle') || name.includes('reverse') || name.includes('map')) {
-    cases.push({
-      strategy: 'behavioral-mirror',
-      description: 'output has same length as input array',
-      inputs: inputsForBehavior(),
-      expectation: { type: 'property', pattern: 'length-preserving' },
-    });
+      cases.push({
+        strategy: 'behavioral-mirror',
+        description: 'output has same length as input array',
+        inputs: inputsForBehavior(),
+        expectation: { type: 'property', pattern: 'length-preserving' },
+      });
     }
   }
 
