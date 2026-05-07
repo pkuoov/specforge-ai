@@ -127,16 +127,50 @@ Options:
 
 ---
 
+## Two packages, two levels of depth
+
+### `@testgen/core` — fast, no heavy deps
+
+Uses regex-based extraction. Works without `tsc`. Good for CI hooks where speed matters.
+
+```bash
+npx testgen src/utils/math.ts
+# writes: math.test.ts  (boundary + happy-path + error-path + behavioral-mirror)
+```
+
+### `@testgen/typescript` — AST-accurate + property-based
+
+Uses the TypeScript Compiler API for exact types, then maps them to `fast-check` arbitraries.
+
+```bash
+npx testgen-ts src/utils/math.ts --mode=both
+# writes: math.test.ts           (standard test suite)
+#         math.property.test.ts  (fast-check property tests)
+```
+
+The type mapper handles: `string`, `number`, `boolean`, `T[]`, `[A, B]`, `A | B`, `A | null`, `Record<K,V>`, `{ field: T }`, `Map<K,V>`, `Set<T>`, `Promise<T>` — and generates the correct `fc.*` arbitrary for each.
+
+Behavioral contracts auto-detected from function names:
+
+| Pattern | Contract generated |
+|---------|-------------------|
+| `clamp(v, min, max)` | `result >= min && result <= max` (property-tested over random inputs) |
+| `normalize*`, `sanitize*` | Idempotency: `f(f(x)) === f(x)` |
+| `add*`, `sum*` with same-type params | Commutativity: `f(a,b) === f(b,a)` |
+| `count*`, `length*`, `total*` | Returns `>= 0` |
+| `sort*`, `map*`, `reverse*` on arrays | Output length equals input length |
+| `filter*` | Output length `<=` input length |
+
 ## Repo structure
 
 ```
 testgen/
 ├── skill/testgen.md          Claude Code skill
 ├── packages/
-│   ├── core/                 Orchestration: extractor, generator, writer, reporter
-│   └── typescript/           Vitest + fast-check adapter (coming in v0.2)
+│   ├── core/                 Regex-based extraction, 4-strategy generator
+│   └── typescript/           AST extractor (TS compiler API) + fast-check mapper
 └── examples/
-    └── basic-function/       Runnable demo
+    └── basic-function/       clamp, sum, normalizeString, first — 4 functions
 ```
 
 ---
@@ -145,13 +179,15 @@ testgen/
 
 - [x] Core: extractor, generator, writer, reporter
 - [x] Claude Code skill
-- [x] CLI (`npx testgen`)
-- [x] CI workflow
-- [ ] `packages/typescript` — full Vitest + fast-check integration
+- [x] CLI (`npx testgen`, `npx testgen-ts`)
+- [x] `@testgen/typescript` — TypeScript Compiler API + fast-check property tests
+- [x] Type-to-arbitrary mapper (string, number, arrays, unions, records, objects, tuples)
+- [x] Behavioral contract detection from function name patterns
+- [x] CI workflow (dogfoods itself)
 - [ ] Python adapter (Hypothesis)
 - [ ] GitHub Action
-- [ ] VS Code extension
 - [ ] Mutation test integration (Stryker)
+- [ ] VS Code extension
 
 ---
 
