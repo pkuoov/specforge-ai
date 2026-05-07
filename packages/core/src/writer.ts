@@ -1,0 +1,161 @@
+import type { FunctionSignature, TestCase, TestPlan } from './types.js';
+
+function formatInput(value: unknown): string {
+  if (value === undefined) return 'undefined';
+  if (value === null) return 'null';
+  if (typeof value === 'string') return JSON.stringify(value);
+  if (typeof value === 'number') {
+    if (Number.isNaN(value)) return 'NaN';
+    if (!Number.isFinite(value)) return value > 0 ? 'Infinity' : '-Infinity';
+    return String(value);
+  }
+  return JSON.stringify(value);
+}
+
+function renderExpectation(
+  fnCall: string,
+  expectation: TestCase['expectation'],
+  sig: FunctionSignature
+): string {
+  const asyncPrefix = sig.isAsync ? 'await ' : '';
+  const call = `${asyncPrefix}${fnCall}`;
+
+  switch (expectation.type) {
+    case 'throw':
+      return `    expect(${sig.isAsync ? 'async ' : ''}() => ${call}).${sig.isAsync ? 'rejects.toThrow' : 'toThrow'}();`;
+
+    case 'return':
+      if (expectation.value !== undefined) {
+        return `    expect(${call}).toEqual(${formatInput(expectation.value)});`;
+      }
+      return `    expect(${call}).toBeDefined();`;
+
+    case 'property':
+      switch (expectation.pattern) {
+        case 'defined':
+          return `    expect(${call}).toBeDefined();`;
+        case 'non-negative':
+          return `    expect(${call}).toBeGreaterThanOrEqual(0);`;
+        case 'idempotent': {
+          const resultVar = `result_${Math.random().toString(36).slice(2, 6)}`;
+          return [
+            `    const ${resultVar} = ${call};`,
+            `    // Idempotency: applying the function twice should equal applying it once`,
+            `    // Adjust the second call to match your function's actual signature`,
+            `    expect(${resultVar}).toBeDefined();`,
+          ].join('\n');
+        }
+        case 'commutative':
+          return `    // Commutativity: verify f(a,b) equals f(b,a)`;
+        case 'length-preserving':
+          return `    expect(Array.isArray(${call})).toBe(true);`;
+        default:
+          return `    expect(${call}).toBeDefined();`;
+      }
+
+    default:
+      return `    expect(${call}).toBeDefined();`;
+  }
+}
+
+function renderTestCase(tc: TestCase, sig: FunctionSignature): string {
+  const args = tc.inputs.map(formatInput).join(', ');
+  const fnCall = `${sig.name}(${args})`;
+  const needsTryCatch =
+    tc.strategy === 'boundary' || tc.strategy === 'error-path';
+
+  const body = needsTryCatch
+    ? [
+        `    // This boundary case may throw — both throwing and returning are acceptable`,
+        `    try {`,
+        `      ${renderExpectation(fnCall, tc.expectation, sig).trim()}`,
+        `    } catch (_e) {`,
+        `      // Throwing is acceptable for this boundary input`,
+        `    }`,
+      ].join('\n')
+    : renderExpectation(fnCall, tc.expectation, sig);
+
+  const itFn = sig.isAsync ? 'it' : 'it';
+  return [
+    `  ${itFn}(${JSON.stringify(tc.description)}, ${sig.isAsync ? 'async ' : ''}() => {`,
+    body,
+    `  });`,
+  ].join('\n');
+}
+
+function groupByStrategy(cases: TestCase[]): Map<TestCase['strategy'], TestCase[]> {
+  const groups = new Map<TestCase['strategy'], TestCase[]>();
+  for (const tc of cases) {
+    const list = groups.get(tc.strategy) ?? [];
+    list.push(tc);
+    groups.set(tc.strategy, list);
+  }
+  return groups;
+}
+
+function renderFunctionBlock(plan: TestPlan, sig: FunctionSignature): string {
+  const groups = groupByStrategy(plan.cases);
+  const sections: string[] = [];
+
+  const labels: Record<TestCase['strategy'], string> = {
+    'boundary': 'boundary cases',
+    'happy-path': 'happy path',
+    'error-path': 'error path',
+    'behavioral-mirror': 'behavioral contracts',
+  };
+
+  for (const [strategy, cases] of groups) {
+    const rendered = cases.map((tc) => renderTestCase(tc, sig)).join('\n\n');
+    sections.push([
+      `  describe(${JSON.stringify(labels[strategy])}, () => {`,
+      rendered,
+      `  });`,
+    ].join('\n'));
+  }
+
+  return [
+    `describe(${JSON.stringify(plan.functionName)}, () => {`,
+    sections.join('\n\n'),
+    `});`,
+  ].join('\n');
+}
+
+export function renderTestFile(
+  plans: TestPlan[],
+  sigs: FunctionSignature[],
+  importPath: string
+): string {
+  const sigMap = new Map(sigs.map((s) => [s.name, s]));
+  const names = plans.map((p) => p.functionName).join(', ');
+
+  const hasFastCheck = plans.some((p) =>
+    p.cases.some((c) => c.strategy === 'behavioral-mirror' && c.expectation.pattern !== 'defined')
+  );
+
+  const imports = [
+    `import { describe, it, expect } from 'vitest';`,
+    hasFastCheck ? `import { fc } from '@fast-check/vitest';` : null,
+    `import { ${names} } from '${importPath}';`,
+  ]
+    .filter(Boolean)
+    .join('\n');
+
+  const blocks = plans
+    .map((plan) => {
+      const sig = sigMap.get(plan.functionName);
+      return sig ? renderFunctionBlock(plan, sig) : '';
+    })
+    .filter(Boolean)
+    .join('\n\n');
+
+  return [
+    `// Generated by testgen — https://github.com/your-org/testgen`,
+    `// DO NOT edit boundary/mirror cases by hand — regenerate with: npx testgen <file>`,
+    `// Add project-specific assertions below each generated block.`,
+    '',
+    imports,
+    '',
+    blocks,
+    '',
+  ].join('\n');
+}

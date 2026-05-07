@@ -1,0 +1,28 @@
+{
+  "name": "@testgen/core",
+  "version": "0.1.0",
+  "description": "Core orchestration logic for testgen — language-agnostic",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "bin": {
+    "testgen": "./bin/testgen.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.39",
+    "typescript": "^6.0.3",
+    "vitest": "^1.6.1"
+  }
+}
