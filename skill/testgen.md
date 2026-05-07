@@ -1,10 +1,10 @@
-# testgen — AI-Aware Test Case Generator
+# testgen — Claude Code AI-Aware Test Case Generator
 
 Generate comprehensive test suites for TypeScript/JavaScript functions, specifically targeting the failure patterns common in AI-generated code.
 
 ## Trigger
 
-Invoke when the user runs `/testgen` or asks to generate tests for a file or function.
+Invoke when the user runs `/testgen` or asks Claude Code to generate tests for a TypeScript/JavaScript file, function, or small directory.
 
 ## What this skill does
 
@@ -20,7 +20,9 @@ Invoke when the user runs `/testgen` or asks to generate tests for a file or fun
 The user provides one of:
 - A file path: `/testgen src/utils/calculate.ts`
 - A directory: `/testgen src/utils/`
-- The current file open in the editor (no argument)
+- No argument only when Claude Code has a current file path in context; otherwise ask for the target path.
+
+For directory input, expand to source files (`.ts`, `.tsx`, `.js`, `.jsx`) and skip existing test files (`*.test.*`, `*.spec.*`) before invoking the CLI per file.
 
 ## Four Test Strategies
 
@@ -138,7 +140,20 @@ describe('functionName', () => {
 
 ### Step 4 — Run and classify failures
 
-Run: `npx vitest run <test-file> --reporter=json`
+Run generated tests through the CLI, which invokes Vitest by default:
+
+```bash
+npx testgen <source-file>
+npx testgen <source-directory>
+```
+
+Use `--no-run` only when the user explicitly wants generation without validation.
+Use `--merge` when an existing test file contains manual tests that should be preserved.
+Use `--invalid-input=throw` when the target project treats invalid runtime input as expected exceptions.
+Use `--invalid-input=skip` when generated invalid-input probes would be too noisy.
+Use `--extractor=regex` only when TypeScript AST extraction is too slow or unavailable.
+
+The AST extractor supports named functions, default function exports, local `export { fn }` specifiers, static class methods, and object-exported functions.
 
 Parse the output and classify each failure:
 
@@ -179,7 +194,7 @@ Run `npx vitest run` to see full output.
 - **Behavioral mirror tests must be written before reading the function body** — generate them from name + types only, then read body to fill in happy-path values
 - **If a function has no exports**, note it and skip
 - **If Vitest is not installed**, detect and suggest: `pnpm add -D vitest @fast-check/vitest`
-- **If the file is already tested** (`.test.ts` exists), ask before overwriting; offer to merge instead
+- **If the file is already tested** (`.test.ts` exists), do not overwrite by default; prefer `--merge` to preserve manual tests, or ask whether to skip or rerun with `--overwrite`
 
 ## Dependency check
 
@@ -192,7 +207,7 @@ grep -E '"vitest"|"jest"' package.json
 grep '"@fast-check' package.json
 ```
 
-If missing, output install commands and proceed — do not block.
+If missing, output install commands. The generator can still write tests, but the report must clearly say validation did not run; never report unexecuted tests as passed.
 
 ## File naming conventions
 
@@ -289,7 +304,7 @@ To run testgen automatically after every AI code write, add to `.claude/settings
     "PostToolUse": [
       {
         "matcher": "Write|Edit",
-        "command": "node packages/core/bin/testgen.js \"$FILE_PATH\" --auto --silent-if-tested",
+        "command": "npx testgen \"$FILE_PATH\" --auto --silent-if-tested",
         "description": "Auto-generate tests for new/modified source files"
       }
     ]
@@ -297,5 +312,30 @@ To run testgen automatically after every AI code write, add to `.claude/settings
 }
 ```
 
-`--auto`: non-interactive, skip prompts  
-`--silent-if-tested`: do nothing if a `.test.ts` already exists
+- `--auto`: non-interactive, skip prompts
+- `--silent-if-tested`: do nothing if a `.test.ts` already exists
+- `--overwrite`: explicitly replace an existing generated test file
+- `--merge`: update or append a protected generated block without deleting manual tests
+- `--no-run`: generate tests without running Vitest
+- `--invalid-input=no-throw|throw|skip`: choose generated invalid-input semantics
+- `--extractor=auto|regex|typescript`: choose export extraction mode
+
+## Project configuration
+
+If the project has `.testgenrc`, `.testgenrc.json`, or `testgen.config.json`, respect it. Supported fields:
+
+```json
+{
+  "runner": "vitest",
+  "testDir": "__generated_tests__",
+  "include": ["src/**/*.{ts,tsx,js,jsx}"],
+  "exclude": ["**/*.test.*", "**/*.spec.*", "**/*.d.ts", "**/dist/**"],
+  "invalidInputStrategy": "no-throw",
+  "merge": false,
+  "extractor": "auto"
+}
+```
+
+`invalidInputStrategy` can be `no-throw`, `throw`, or `skip`.
+`merge` preserves manual tests by updating content inside `// <testgen:generated>` markers.
+`extractor` can be `auto`, `regex`, or `typescript`.

@@ -28,12 +28,20 @@ jobs:
       - name: Type check
         run: pnpm typecheck
 
+      - name: Public repo audit
+        run: pnpm public-audit
+
       - name: Build
         run: pnpm build
 
       - name: Test
         run: pnpm test
 
+      - name: Package dry run
+        run: |
+          mkdir -p /tmp/testgen-packcheck
+          pnpm -r packcheck
+
       - name: Dogfood — generate tests for examples
         run: |
-          node packages/core/bin/testgen.js examples/basic-function/clamp.ts --dry-run
+          node packages/core/bin/testgen.js examples/basic-function/clamp.ts --dry-run --extractor=typescript

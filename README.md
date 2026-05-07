@@ -33,6 +33,30 @@ The behavioral mirror strategy is the key differentiator: it asks *"what must al
 
 ---
 
+## Current status
+
+testgen is currently usable as a P0 autotest assistant for exported TypeScript/JavaScript functions:
+
+- It can generate tests for a single source file or a directory.
+- It refuses to overwrite existing tests unless `--overwrite` is provided.
+- It runs Vitest by default and does not report unexecuted tests as passed.
+- It supports project-level JSON config via `.testgenrc`, `.testgenrc.json`, or `testgen.config.json`.
+- It supports invalid-input policy selection with `no-throw`, `throw`, or `skip`.
+- It prefers TypeScript AST extraction when TypeScript is available, then falls back to regex extraction.
+- It can merge generated output into a protected `// <testgen:generated>` block with `--merge`.
+- It supports default function exports, local export specifiers, static class methods, and object-exported functions in AST mode.
+- It includes behavioral contracts for predicates, validators, grouping helpers, uniqueness helpers, and min/max/average utilities.
+- It can turn simple JSDoc examples such as `@example add(1, 2) => 3` into concrete `toEqual` happy-path tests.
+- It includes Claude Code and Codex skill definitions.
+- It includes CI checks for typecheck, tests, build, dogfood generation, public audit, and package pack checks.
+
+Known limits:
+
+- React components, API routes, overload-specific cases, default class exports, cross-file re-exports, and complex module shapes need P1/P2 work.
+- `testgen.config.ts` is not supported yet; config is JSON-only to avoid runtime loader dependencies.
+
+---
+
 ## Quick start
 
 ```bash
@@ -42,8 +66,23 @@ pnpm add -D @testgen/core vitest @fast-check/vitest
 # Generate tests for a file
 npx testgen src/utils/math.ts
 
+# Generate tests for every matching source file in a directory
+npx testgen src/utils/
+
 # Dry run — print without writing
 npx testgen src/utils/math.ts --dry-run
+
+# Write tests but skip validation
+npx testgen src/utils/math.ts --no-run
+
+# Replace an existing generated test file
+npx testgen src/utils/math.ts --overwrite
+
+# Merge into an existing test file without deleting manual tests
+npx testgen src/utils/math.ts --merge
+
+# Treat invalid inputs as expected throws instead of no-throw probes
+npx testgen src/utils/math.ts --invalid-input=throw
 ```
 
 ### Example
@@ -58,7 +97,6 @@ export function clamp(value: number, min: number, max: number): number {
 **Output: `src/utils/clamp.test.ts`** (generated)
 ```typescript
 import { describe, it, expect } from 'vitest';
-import { fc } from '@fast-check/vitest';
 import { clamp } from './clamp';
 
 describe('clamp', () => {
@@ -70,29 +108,43 @@ describe('clamp', () => {
   });
 
   describe('behavioral contracts', () => {
-    it.prop([fc.integer(), fc.integer(), fc.integer()])(
-      'result is always within [min, max] when min <= max',
-      (value, a, b) => {
-        const [min, max] = [Math.min(a, b), Math.max(a, b)];
-        const result = clamp(value, min, max);
-        expect(result).toBeGreaterThanOrEqual(min);
-        expect(result).toBeLessThanOrEqual(max);
-      }
-    );
-    it('is idempotent: clamping twice equals clamping once', () => { /* ... */ });
+    it('returns a value within [min, max] when min <= max', () => {
+      const result = clamp(42, 0, 100);
+      expect(typeof result).toBe('number');
+      expect(result).toBeGreaterThanOrEqual(0);
+      expect(result).toBeLessThanOrEqual(100);
+    });
   });
 });
 ```
 
 ---
 
-## Claude Code integration
+## Usage with AI coding tools
 
-### As a skill
+### Claude Code skill
 
-Copy `skill/testgen.md` to `~/.claude/agents/testgen.md`, then use `/testgen src/utils/math.ts` in any Claude Code session.
+Copy the Claude skill into your Claude Code agents directory:
 
-### As a PostToolUse hook
+```bash
+mkdir -p ~/.claude/agents
+cp skill/testgen.md ~/.claude/agents/testgen.md
+```
+
+Then use `/testgen src/utils/math.ts` in a Claude Code session.
+
+### Codex skill
+
+Copy the Codex skill folder into your Codex skills directory:
+
+```bash
+mkdir -p ~/.codex/skills
+cp -R skill/codex/testgen ~/.codex/skills/testgen
+```
+
+Codex will auto-discover `~/.codex/skills/testgen/SKILL.md`.
+
+### Claude Code PostToolUse hook
 
 Run automatically after every AI code edit:
 
@@ -112,26 +164,56 @@ Run automatically after every AI code edit:
 
 Add this to `.claude/settings.json` in your project. testgen will skip files that already have a `.test.ts`.
 
----
-
 ## CLI options
 
 ```
-npx testgen <file.ts> [options]
+npx testgen <file-or-dir> [options]
 
 Options:
   --auto              Non-interactive mode (skip all prompts)
   --silent-if-tested  Do nothing if a .test.ts already exists
   --dry-run           Print generated test file without writing it
+  --overwrite         Replace an existing .test.ts
+  --merge             Update or append a protected generated block
+  --no-run            Write tests without running Vitest
+  --invalid-input     Invalid input strategy: no-throw, throw, or skip
+  --extractor         Extraction mode: auto, regex, or typescript
 ```
+
+By default, `testgen` refuses to overwrite existing tests and runs Vitest after writing. Dry runs and `--no-run` never report generated tests as passed.
+
+### Configuration
+
+Add `.testgenrc`, `.testgenrc.json`, or `testgen.config.json` to a project root:
+
+```json
+{
+  "runner": "vitest",
+  "testDir": "__generated_tests__",
+  "include": ["src/**/*.{ts,tsx,js,jsx}"],
+  "exclude": ["**/*.test.*", "**/*.spec.*", "**/*.d.ts", "**/dist/**"],
+  "invalidInputStrategy": "no-throw",
+  "merge": false,
+  "extractor": "auto"
+}
+```
+
+Config fields:
+
+- `runner`: currently `vitest`; `jest` is reserved for future support.
+- `testDir`: optional output directory. When omitted, tests are written beside the source file.
+- `include` / `exclude`: glob-like filters used when the CLI target is a directory.
+- `invalidInputStrategy`: `no-throw` generates crash-detection probes, `throw` expects invalid inputs to throw, and `skip` omits generated invalid-input error-path tests.
+- `merge`: when `true`, existing tests are preserved and generated content is updated inside `// <testgen:generated>` markers.
+- `extractor`: `auto` prefers TypeScript AST extraction when available, `regex` forces the lightweight extractor, and `typescript` fails if AST extraction cannot run.
 
 ---
 
 ## Two packages, two levels of depth
 
-### `@testgen/core` — fast, no heavy deps
+### `@testgen/core` — fast, AST-first when available
 
-Uses regex-based extraction. Works without `tsc`. Good for CI hooks where speed matters.
+Prefers TypeScript AST extraction when `typescript` is available and falls back to regex extraction. Good for CI hooks where speed matters but exported function shapes may be slightly richer than simple declarations.
 
 ```bash
 npx testgen src/utils/math.ts
@@ -160,14 +242,20 @@ Behavioral contracts auto-detected from function names:
 | `count*`, `length*`, `total*` | Returns `>= 0` |
 | `sort*`, `map*`, `reverse*` on arrays | Output length equals input length |
 | `filter*` | Output length `<=` input length |
+| `is*`, `has*`, `validate*` | Returns a boolean |
+| `unique*` | Output array contains unique values |
+| `min*`, `max*`, `average*` | Numeric result respects input bounds |
+| `group*` / `groupBy*` | Returns an object grouping result |
 
 ## Repo structure
 
 ```
 testgen/
-├── skill/testgen.md          Claude Code skill
+├── skill/
+│   ├── testgen.md            Claude Code skill
+│   └── codex/testgen/        Codex skill folder
 ├── packages/
-│   ├── core/                 Regex-based extraction, 4-strategy generator
+│   ├── core/                 AST-first extraction with regex fallback, 4-strategy generator
 │   └── typescript/           AST extractor (TS compiler API) + fast-check mapper
 └── examples/
     └── basic-function/       clamp, sum, normalizeString, first — 4 functions
@@ -177,16 +265,49 @@ testgen/
 
 ## Roadmap
 
-- [x] Core: extractor, generator, writer, reporter
-- [x] Claude Code skill
-- [x] CLI (`npx testgen`, `npx testgen-ts`)
-- [x] `@testgen/typescript` — TypeScript Compiler API + fast-check property tests
-- [x] Type-to-arbitrary mapper (string, number, arrays, unions, records, objects, tuples)
-- [x] Behavioral contract detection from function name patterns
-- [x] CI workflow (dogfoods itself)
-- [ ] Python adapter (Hypothesis)
-- [ ] GitHub Action
-- [ ] Mutation test integration (Stryker)
+### P0 — Minimum trustworthy autotest signal
+
+Status: complete.
+
+- [x] Prevent unexecuted tests from being reported as passed
+- [x] Refuse to overwrite existing tests by default
+- [x] Make boundary/error-path failures visible instead of swallowing exceptions
+- [x] Add directory input support with include/exclude filtering
+- [x] Add JSON config files: `.testgenrc`, `.testgenrc.json`, `testgen.config.json`
+- [x] Add invalid input policies: `no-throw`, `throw`, `skip`
+- [x] Add real contract assertions for common name patterns
+- [x] Add runner failure reporting when Vitest is missing or JSON output cannot be parsed
+- [x] Add Claude Code and Codex skills
+
+### P1 — Production-grade generated tests
+
+Status: in progress.
+
+- [x] Make the TypeScript AST extractor the default when TypeScript is available
+- [x] Add safe merge mode for existing tests instead of only skip/overwrite
+- [x] Add deterministic output formatting and remove generated-name randomness
+- [x] Expand behavioral contracts for predicate, validate, groupBy, unique, min/max, and average utilities
+- [x] Support default function exports, default class static methods, local export specifiers, namespace functions, class static methods, and object-exported functions
+- [x] Use simple JSDoc examples as concrete expected values
+- [ ] Improve expected values using literals and simple implementation cues
+- [ ] Expand behavioral contracts for parse, get*, and date utilities
+- [ ] Support cross-file named re-exports, overload-specific cases, and namespace re-export forms
+- [ ] Add fixture generation for object parameters and domain-shaped values
+- [ ] Add snapshot/update workflow for generated regions
+
+### P2 — Broader framework and CI integration
+
+Status: planned.
+
+- [ ] React component tests with Testing Library
+- [ ] API route/request-response contract tests
+- [ ] Jest, Bun test, and Node test runner support
+- [x] GitHub Action for typecheck, tests, build, dogfood generation, public audit, and package pack checks
+- [x] Public repository audit script for sensitive content, local paths, and forbidden env/key files
+- [ ] Mutation testing integration with Stryker
+- [ ] Coverage delta reporting
+- [ ] `testgen.config.ts` support with a deliberate loader strategy
+- [ ] Python adapter using Hypothesis
 - [ ] VS Code extension
 
 ---
@@ -194,6 +315,17 @@ testgen/
 ## Contributing
 
 PRs welcome. Please open an issue first for anything beyond bug fixes.
+
+Before publishing or pushing a public mirror, run:
+
+```bash
+pnpm public-audit
+pnpm typecheck
+pnpm test
+pnpm build
+mkdir -p /tmp/testgen-packcheck
+pnpm -r packcheck
+```
 
 ---
 

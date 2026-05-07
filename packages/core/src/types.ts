@@ -17,11 +17,27 @@ export interface FunctionParam {
 
 export interface FunctionSignature {
   name: string;
+  importName?: string;
+  exportKind?: 'named' | 'default';
+  callExpression?: string;
   params: FunctionParam[];
   returnType: string;
   isAsync: boolean;
   jsdoc?: string | undefined;
   isExported: boolean;
+}
+
+export type InvalidInputStrategy = 'no-throw' | 'throw' | 'skip';
+export type ExtractorMode = 'auto' | 'regex' | 'typescript';
+
+export interface TestgenConfig {
+  runner?: 'vitest' | 'jest';
+  testDir?: string;
+  include?: string[];
+  exclude?: string[];
+  invalidInputStrategy?: InvalidInputStrategy;
+  merge?: boolean;
+  extractor?: ExtractorMode;
 }
 
 export interface TestExpectation {
@@ -71,5 +87,14 @@ export interface TestgenOptions {
   auto: boolean;
   silentIfTested: boolean;
   dryRun: boolean;
+  overwrite: boolean;
+  merge: boolean;
+  runAfterWrite: boolean;
   runner: 'vitest' | 'jest';
+  extractor: ExtractorMode;
+  testDir?: string | undefined;
+  configDir?: string | undefined;
+  include: string[];
+  exclude: string[];
+  invalidInputStrategy: InvalidInputStrategy;
 }

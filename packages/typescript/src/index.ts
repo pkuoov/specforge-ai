@@ -5,6 +5,7 @@ import {
   renderTestFile,
   buildReport,
   formatReport,
+  type FunctionSignature,
   type TestgenOptions,
   type TestgenReport,
 } from '@testgen/core';
@@ -23,6 +24,8 @@ export type TestgenMode = 'standard' | 'property' | 'both';
 export interface TypeScriptTestgenOptions extends Partial<TestgenOptions> {
   mode?: TestgenMode;
   tsConfigPath?: string;
+  overwrite?: boolean;
+  invalidInputStrategy?: 'no-throw' | 'throw' | 'skip';
   runAfterWrite?: boolean;
 }
 
@@ -36,7 +39,8 @@ export async function runTestgen(
     runAfterWrite = false,
     dryRun = false,
     silentIfTested = false,
-    auto = false,
+    overwrite = false,
+    invalidInputStrategy = 'no-throw',
   } = options;
 
   const absolutePath = resolve(sourceFilePath);
@@ -48,6 +52,18 @@ export async function runTestgen(
 
   if (silentIfTested && existsSync(standardTestPath) && existsSync(propertyTestPath)) {
     return buildReport(sourceFilePath, []);
+  }
+
+  const targetPaths = [
+    ...(mode === 'standard' || mode === 'both' ? [standardTestPath] : []),
+    ...(mode === 'property' || mode === 'both' ? [propertyTestPath] : []),
+  ];
+  const existingPaths = targetPaths.filter((path) => existsSync(path));
+  if (existingPaths.length > 0 && !overwrite) {
+    throw new Error(
+      `testgen: refusing to overwrite existing test file(s): ${existingPaths.join(', ')}. ` +
+        'Pass --overwrite to replace them, or --silent-if-tested to skip when tests exist.'
+    );
   }
 
   // Use AST extractor — accurate types from the compiler
@@ -62,7 +78,15 @@ export async function runTestgen(
   const writtenFiles: string[] = [];
 
   if (mode === 'standard' || mode === 'both') {
-    const plans = sigs.map((sig) => generateTestPlan(sig, importPath));
+    const plans = sigs.map((sig) =>
+      (
+        generateTestPlan as (
+          sig: FunctionSignature,
+          importPath: string,
+          options?: { invalidInputStrategy?: 'no-throw' | 'throw' | 'skip' }
+        ) => ReturnType<typeof generateTestPlan>
+      )(sig, importPath, { invalidInputStrategy })
+    );
     const testSource = renderTestFile(plans, sigs, importPath);
     if (!dryRun) {
       writeFileSync(standardTestPath, testSource, 'utf-8');
@@ -90,15 +114,23 @@ export async function runTestgen(
     return buildReport(sourceFilePath, merged);
   }
 
-  // Return a structural report without running tests
-  const plans = sigs.map((sig) => generateTestPlan(sig, importPath));
+  if (dryRun) {
+    return buildReport(sourceFilePath, []);
+  }
+
+  // Generation-only mode intentionally reports no pass/fail results.
+  const plans = sigs.map((sig) =>
+    (
+      generateTestPlan as (
+        sig: FunctionSignature,
+        importPath: string,
+        options?: { invalidInputStrategy?: 'no-throw' | 'throw' | 'skip' }
+      ) => ReturnType<typeof generateTestPlan>
+    )(sig, importPath, { invalidInputStrategy })
+  );
   const functionReports = plans.map((plan) => ({
     functionName: plan.functionName,
-    results: plan.cases.map((tc) => ({
-      passed: true,
-      strategy: tc.strategy,
-      description: tc.description,
-    })),
+    results: [],
   }));
 
   return buildReport(sourceFilePath, functionReports);

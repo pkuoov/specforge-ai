@@ -35,6 +35,13 @@ function classifyFailure(error: string): FailurePattern {
   return 'logic-error';
 }
 
+function classifyResult(result: Omit<TestResult, 'failurePattern'>): TestResult {
+  if (result.passed || !result.error) {
+    return { ...result, passed: true };
+  }
+  return { ...result, failurePattern: classifyFailure(result.error) };
+}
+
 function strategyFromAncestors(ancestors: string[]): TestStrategy {
   const label = (ancestors[1] ?? ancestors[0] ?? '').toLowerCase();
   if (label.includes('boundary')) return 'boundary';
@@ -58,8 +65,24 @@ function findVitestBin(testFilePath: string): string {
   return 'vitest'; // fall back to PATH
 }
 
+function buildRunnerFailure(message: string): FunctionReport[] {
+  return [
+    {
+      functionName: 'testgen',
+      results: [
+        classifyResult({
+          passed: false,
+          strategy: 'error-path',
+          description: 'runs generated tests',
+          error: message,
+        }),
+      ],
+    },
+  ];
+}
+
 export function runVitest(testFilePath: string): Promise<FunctionReport[]> {
-  return new Promise((resolve, reject) => {
+  return new Promise((resolve) => {
     const vitestBin = findVitestBin(testFilePath);
     const child = spawn(
       vitestBin,
@@ -71,12 +94,14 @@ export function runVitest(testFilePath: string): Promise<FunctionReport[]> {
     let stderr = '';
     child.stdout.on('data', (d: Buffer) => (stdout += d.toString()));
     child.stderr.on('data', (d: Buffer) => (stderr += d.toString()));
+    child.on('error', (error) => {
+      resolve(buildRunnerFailure(`vitest unavailable: ${error.message}`));
+    });
 
     child.on('close', () => {
       const jsonStart = stdout.indexOf('{');
       if (jsonStart === -1) {
-        // vitest not available or no JSON output — return empty
-        resolve([]);
+        resolve(buildRunnerFailure(stderr.trim() || 'vitest did not emit JSON output'));
         return;
       }
 
@@ -84,7 +109,7 @@ export function runVitest(testFilePath: string): Promise<FunctionReport[]> {
       try {
         parsed = JSON.parse(stdout.slice(jsonStart)) as VitestJsonResult;
       } catch {
-        reject(new Error(`testgen: failed to parse vitest JSON output\n${stderr}`));
+        resolve(buildRunnerFailure(`failed to parse vitest JSON output: ${stderr.trim()}`));
         return;
       }
 

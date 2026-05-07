@@ -3,10 +3,12 @@
   "private": true,
   "version": "0.1.0",
   "description": "AI-aware test case generator for TypeScript/JavaScript",
+  "license": "MIT",
   "scripts": {
     "build": "pnpm -r build",
     "test": "pnpm -r test",
     "lint": "pnpm -r lint",
+    "public-audit": "bash scripts/public-audit.sh",
     "typecheck": "pnpm -r typecheck",
     "dev": "pnpm -r --parallel dev"
   },

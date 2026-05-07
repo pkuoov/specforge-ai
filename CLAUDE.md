@@ -6,8 +6,9 @@ AI-aware test case generator for TypeScript/JavaScript. Generates boundary, happ
 
 ```
 packages/core/        — Orchestration: extractor → generator → writer → reporter
-packages/typescript/  — Vitest + fast-check adapter (Phase 3)
+packages/typescript/  — Vitest + fast-check adapter
 skill/testgen.md      — Claude Code skill
+skill/codex/testgen/  — Codex skill
 examples/             — Runnable demos
 ```
 
@@ -28,6 +29,15 @@ node packages/core/bin/testgen.js examples/basic-function/clamp.ts
 
 # Dry run (print without writing)
 node packages/core/bin/testgen.js examples/basic-function/clamp.ts --dry-run
+
+# Write without validating
+node packages/core/bin/testgen.js examples/basic-function/clamp.ts --no-run
+
+# Explicitly replace an existing test file
+node packages/core/bin/testgen.js examples/basic-function/clamp.ts --overwrite
+
+# Preserve manual tests and update/append the generated block
+node packages/core/bin/testgen.js examples/basic-function/clamp.ts --merge
 ```
 
 ## Development workflow
@@ -39,7 +49,27 @@ node packages/core/bin/testgen.js examples/basic-function/clamp.ts --dry-run
 
 ## Current phase
 
-Phase 2 — core package complete. Phase 3 (TypeScript adapter with fast-check integration) is next.
+P0 is complete. P1 is in progress. Core and TypeScript packages are available. The core CLI writes standard Vitest tests, supports directory targets, respects JSON config, refuses overwrites by default, supports safe merge blocks, prefers TypeScript AST extraction when available, supports default function exports/default class static methods/namespace functions/object-exported functions, uses simple JSDoc examples as concrete expected values, and runs Vitest by default. The TypeScript package adds deeper AST extraction and fast-check property test generation.
+
+## P1/P2 implementation queue
+
+P1 should continue production-grade generated tests:
+
+1. Improve expected values using literals and simple implementation cues.
+2. Expand behavioral contract patterns for parse, get, and date utilities.
+3. Support cross-file re-exports, overload-specific cases, and namespace re-export forms.
+4. Add fixture generation for object parameters and domain-shaped values.
+5. Add a snapshot/update workflow around generated regions.
+
+P2 should broaden integrations:
+
+1. React component tests with Testing Library.
+2. API route/request-response contract tests.
+3. Jest, Bun test, and Node test runner support.
+4. Mutation testing integration.
+5. Coverage delta reporting and `testgen.config.ts` support.
+
+Already implemented P2 infrastructure: GitHub Actions CI, dogfood generation, public repository audit, and package pack checks.
 
 ## Test runner requirement
 

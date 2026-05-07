@@ -2,6 +2,7 @@
   "name": "@testgen/typescript",
   "version": "0.1.0",
   "description": "TypeScript adapter for testgen — AST-based extraction + fast-check property tests",
+  "license": "MIT",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -11,14 +12,18 @@
       "types": "./dist/index.d.ts"
     }
   },
+  "bin": {
+    "testgen-ts": "./bin/testgen-ts.js"
+  },
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "packcheck": "pnpm pack --pack-destination /tmp/testgen-packcheck"
   },
   "dependencies": {
-    "@testgen/core": "file:../core"
+    "@testgen/core": "workspace:*"
   },
   "peerDependencies": {
     "typescript": ">=5.0.0",
@@ -30,5 +35,9 @@
     "fast-check": "^3.19.0",
     "typescript": "^6.0.3",
     "vitest": "^1.6.1"
-  }
+  },
+  "files": [
+    "dist",
+    "bin"
+  ]
 }

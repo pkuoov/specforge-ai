@@ -2,6 +2,7 @@
   "name": "@testgen/core",
   "version": "0.1.0",
   "description": "Core orchestration logic for testgen — language-agnostic",
+  "license": "MIT",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -18,7 +19,8 @@
     "build": "tsc",
     "dev": "tsc --watch",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "packcheck": "pnpm pack --pack-destination /tmp/testgen-packcheck"
   },
   "devDependencies": {
     "@types/node": "^20.19.39",

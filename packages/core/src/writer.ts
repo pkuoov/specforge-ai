@@ -1,8 +1,9 @@
 import type { FunctionSignature, TestCase, TestPlan } from './types.js';
 
 function formatInput(value: unknown): string {
-  if (value === undefined) return 'undefined';
-  if (value === null) return 'null';
+  if (value === undefined) return 'undefined as any';
+  if (value === null) return 'null as any';
+  if (Array.isArray(value)) return `[${value.map(formatInput).join(', ')}]`;
   if (typeof value === 'string') return JSON.stringify(value);
   if (typeof value === 'number') {
     if (Number.isNaN(value)) return 'NaN';
@@ -36,17 +37,6 @@ function renderExpectation(
           return `    expect(${call}).toBeDefined();`;
         case 'non-negative':
           return `    expect(${call}).toBeGreaterThanOrEqual(0);`;
-        case 'idempotent': {
-          const resultVar = `result_${Math.random().toString(36).slice(2, 6)}`;
-          return [
-            `    const ${resultVar} = ${call};`,
-            `    // Idempotency: applying the function twice should equal applying it once`,
-            `    // Adjust the second call to match your function's actual signature`,
-            `    expect(${resultVar}).toBeDefined();`,
-          ].join('\n');
-        }
-        case 'commutative':
-          return `    // Commutativity: verify f(a,b) equals f(b,a)`;
         case 'length-preserving':
           return `    expect(Array.isArray(${call})).toBe(true);`;
         default:
@@ -58,22 +48,134 @@ function renderExpectation(
   }
 }
 
+function renderPropertyExpectation(tc: TestCase, sig: FunctionSignature): string | undefined {
+  const args = tc.inputs.map(formatInput);
+  const asyncPrefix = sig.isAsync ? 'await ' : '';
+  const callTarget = sig.callExpression ?? sig.name;
+  const call = `${asyncPrefix}${callTarget}(${args.join(', ')})`;
+
+  switch (tc.expectation.pattern) {
+    case 'idempotent':
+      if (args.length !== 1) return undefined;
+      return [
+        `    const once = ${call};`,
+        `    const twice = ${asyncPrefix}${callTarget}(once as any);`,
+        `    expect(twice).toEqual(once);`,
+      ].join('\n');
+
+    case 'commutative':
+      if (args.length !== 2) return undefined;
+      return [
+        `    const ab = ${call};`,
+        `    const ba = ${asyncPrefix}${callTarget}(${args[1]}, ${args[0]});`,
+        `    expect(ba).toEqual(ab);`,
+      ].join('\n');
+
+    case 'length-preserving':
+    case 'length-upper-bound': {
+      const arrayArgIndex = tc.inputs.findIndex((value) => Array.isArray(value));
+      const arrayArg = args[arrayArgIndex];
+      if (arrayArgIndex === -1 || !arrayArg) return undefined;
+      const comparator =
+        tc.expectation.pattern === 'length-upper-bound'
+          ? `toBeLessThanOrEqual((${arrayArg}).length)`
+          : `toBe((${arrayArg}).length)`;
+      return [
+        `    const result = ${call};`,
+        `    expect(Array.isArray(result)).toBe(true);`,
+        `    expect((result as unknown[]).length).${comparator};`,
+      ].join('\n');
+    }
+
+    case 'clamp-range':
+      if (args.length < 3) return undefined;
+      return [
+        `    const result = ${call};`,
+        `    expect(typeof result).toBe('number');`,
+        `    expect(result).toBeGreaterThanOrEqual(${args[1]});`,
+        `    expect(result).toBeLessThanOrEqual(${args[2]});`,
+      ].join('\n');
+
+    case 'boolean-return':
+      return [
+        `    const result = ${call};`,
+        `    expect(typeof result).toBe('boolean');`,
+      ].join('\n');
+
+    case 'object-return':
+      return [
+        `    const result = ${call};`,
+        `    expect(result).toBeTruthy();`,
+        `    expect(typeof result).toBe('object');`,
+        `    expect(Array.isArray(result)).toBe(false);`,
+      ].join('\n');
+
+    case 'unique-values': {
+      const arrayArgIndex = tc.inputs.findIndex((value) => Array.isArray(value));
+      const arrayArg = args[arrayArgIndex];
+      if (arrayArgIndex === -1 || !arrayArg) return undefined;
+      return [
+        `    const result = ${call};`,
+        `    expect(Array.isArray(result)).toBe(true);`,
+        `    expect((result as unknown[]).length).toBeLessThanOrEqual((${arrayArg}).length);`,
+        `    expect(new Set(result as unknown[]).size).toBe((result as unknown[]).length);`,
+      ].join('\n');
+    }
+
+    case 'min-bound':
+    case 'max-bound':
+    case 'average-bound': {
+      const arrayArgIndex = tc.inputs.findIndex((value) => Array.isArray(value));
+      const arrayArg = args[arrayArgIndex];
+      if (arrayArgIndex === -1 || !arrayArg) return undefined;
+      const resultChecks =
+        tc.expectation.pattern === 'min-bound'
+          ? [
+              `    expect(values.every((value) => result <= value)).toBe(true);`,
+              `    expect(values).toContain(result);`,
+            ]
+          : tc.expectation.pattern === 'max-bound'
+            ? [
+                `    expect(values.every((value) => result >= value)).toBe(true);`,
+                `    expect(values).toContain(result);`,
+              ]
+            : [
+                `    expect(result).toBeGreaterThanOrEqual(Math.min(...values));`,
+                `    expect(result).toBeLessThanOrEqual(Math.max(...values));`,
+              ];
+      return [
+        `    const values = ${arrayArg};`,
+        `    const result = ${call};`,
+        `    expect(typeof result).toBe('number');`,
+        ...resultChecks,
+      ].join('\n');
+    }
+
+    default:
+      return undefined;
+  }
+}
+
+function renderBoundaryExpectation(fnCall: string, sig: FunctionSignature): string {
+  if (sig.isAsync) {
+    return `    await expect(${fnCall}).resolves.toBeDefined();`;
+  }
+  return `    expect(() => ${fnCall}).not.toThrow();`;
+}
+
 function renderTestCase(tc: TestCase, sig: FunctionSignature): string {
   const args = tc.inputs.map(formatInput).join(', ');
-  const fnCall = `${sig.name}(${args})`;
-  const needsTryCatch =
-    tc.strategy === 'boundary' || tc.strategy === 'error-path';
-
-  const body = needsTryCatch
-    ? [
-        `    // This boundary case may throw — both throwing and returning are acceptable`,
-        `    try {`,
-        `      ${renderExpectation(fnCall, tc.expectation, sig).trim()}`,
-        `    } catch (_e) {`,
-        `      // Throwing is acceptable for this boundary input`,
-        `    }`,
-      ].join('\n')
-    : renderExpectation(fnCall, tc.expectation, sig);
+  const fnCall = `${sig.callExpression ?? sig.name}(${args})`;
+  const propertyBody =
+    tc.expectation.type === 'property' ? renderPropertyExpectation(tc, sig) : undefined;
+  const body =
+    propertyBody
+      ? propertyBody
+      : tc.expectation.type === 'throw'
+      ? renderExpectation(fnCall, tc.expectation, sig)
+      : tc.strategy === 'boundary' || tc.strategy === 'error-path'
+      ? renderBoundaryExpectation(fnCall, sig)
+      : renderExpectation(fnCall, tc.expectation, sig);
 
   const itFn = sig.isAsync ? 'it' : 'it';
   return [
@@ -126,16 +228,24 @@ export function renderTestFile(
   importPath: string
 ): string {
   const sigMap = new Map(sigs.map((s) => [s.name, s]));
-  const names = plans.map((p) => p.functionName).join(', ');
-
-  const hasFastCheck = plans.some((p) =>
-    p.cases.some((c) => c.strategy === 'behavioral-mirror' && c.expectation.pattern !== 'defined')
-  );
+  const selectedSigs = plans
+    .map((p) => sigMap.get(p.functionName))
+    .filter((sig): sig is FunctionSignature => !!sig);
+  const defaultImports = [...new Set(selectedSigs
+    .filter((sig) => sig.exportKind === 'default')
+    .map((sig) => sig.importName ?? sig.name))];
+  const namedImports = [
+    ...new Set(
+      selectedSigs
+        .filter((sig) => sig.exportKind !== 'default')
+        .map((sig) => sig.importName ?? sig.name)
+    ),
+  ];
 
   const imports = [
     `import { describe, it, expect } from 'vitest';`,
-    hasFastCheck ? `import { fc } from '@fast-check/vitest';` : null,
-    `import { ${names} } from '${importPath}';`,
+    ...defaultImports.map((name) => `import ${name} from '${importPath}';`),
+    namedImports.length > 0 ? `import { ${namedImports.join(', ')} } from '${importPath}';` : '',
   ]
     .filter(Boolean)
     .join('\n');

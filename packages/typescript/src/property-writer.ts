@@ -175,39 +175,33 @@ export function renderPropertyBlock(sig: FunctionSignature, importPath: string):
 // ─── ${sig.name} ──────────────────────────────────────────────────────
 describe('${sig.name} — property tests', () => {
   // Boundary: null/undefined on each parameter
-${sig.params.map((p, i) => {
-  const nullInputs = sig.params.map((_, j) => (j === i ? 'null' : arbitraries[j]));
-  return `  it.prop([${nullInputs.join(', ')}])(
-    'survives null for parameter "${p.name}"',
-    ${sig.isAsync ? 'async ' : ''}(${paramNames}) => {
-      try {
-        ${awaitPrefix}${sig.name}(${callArgs});
-      } catch (_e) {
-        // throwing is acceptable for null input
-      }
-    }
-  );`;
-}).join('\n')}
+	${sig.params.map((p, i) => {
+	  const nullInputs = sig.params.map((_, j) => (j === i ? 'fc.constant(null as any)' : arbitraries[j]));
+	  return `  it.prop([${nullInputs.join(', ')}])(
+	    'does not throw for null parameter "${p.name}"',
+	    ${sig.isAsync ? 'async ' : ''}(${paramNames}) => {
+	      ${sig.isAsync
+	        ? `await expect(${sig.name}(${callArgs})).resolves.toBeDefined();`
+	        : `expect(() => ${sig.name}(${callArgs})).not.toThrow();`}
+	    }
+	  );`;
+	}).join('\n')}
 
   // Behavioral contracts (derived from name + types, not implementation)
 ${returnContract.join('\n\n')}
 
   // Round-trip: output is the right type
-  it.prop([${argsStr}])(
-    'return type matches declared signature',
-    ${sig.isAsync ? 'async ' : ''}(${paramNames}) => {
-      try {
-        const result = ${awaitPrefix}${sig.name}(${callArgs});
-        const returnsNull = ${JSON.stringify(sig.returnType)}.includes('null');
-        const returnsUndefined = ${JSON.stringify(sig.returnType)}.includes('undefined') || ${JSON.stringify(sig.returnType)} === 'void';
-        if (!returnsNull && !returnsUndefined) {
-          expect(result).toBeDefined();
-        }
-      } catch (_e) {
-        expect(_e).toBeInstanceOf(Error);
-      }
-    }
-  );
+	  it.prop([${argsStr}])(
+	    'return type matches declared signature',
+	    ${sig.isAsync ? 'async ' : ''}(${paramNames}) => {
+	      const result = ${awaitPrefix}${sig.name}(${callArgs});
+	      const returnsNull = ${JSON.stringify(sig.returnType)}.includes('null');
+	      const returnsUndefined = ${JSON.stringify(sig.returnType)}.includes('undefined') || ${JSON.stringify(sig.returnType)} === 'void';
+	      if (!returnsNull && !returnsUndefined) {
+	        expect(result).toBeDefined();
+	      }
+	    }
+	  );
 });
 `.trim();
 
