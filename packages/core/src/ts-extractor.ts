@@ -1,3 +1,5 @@
+import { existsSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
 import type * as TypeScript from 'typescript';
 import type { FunctionParam, FunctionSignature } from './types.js';
 
@@ -33,6 +35,37 @@ function typeToString(ts: TS, type: TypeScript.Type, checker: TypeScript.TypeChe
   );
 }
 
+function literalValueFromExpression(ts: TS, node: TypeScript.Expression | undefined): unknown {
+  if (!node) return undefined;
+  if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) return node.text;
+  if (node.kind === ts.SyntaxKind.TrueKeyword) return true;
+  if (node.kind === ts.SyntaxKind.FalseKeyword) return false;
+  if (node.kind === ts.SyntaxKind.NullKeyword) return null;
+  if (ts.isNumericLiteral(node)) return Number(node.text);
+  if (
+    ts.isPrefixUnaryExpression(node) &&
+    node.operator === ts.SyntaxKind.MinusToken &&
+    ts.isNumericLiteral(node.operand)
+  ) {
+    return -Number(node.operand.text);
+  }
+  return undefined;
+}
+
+function literalReturnValueFromBody(
+  ts: TS,
+  body: TypeScript.ConciseBody | TypeScript.Block | undefined
+): unknown {
+  if (!body) return undefined;
+  if (!ts.isBlock(body)) return literalValueFromExpression(ts, body);
+
+  const [statement] = body.statements;
+  if (body.statements.length !== 1 || !statement || !ts.isReturnStatement(statement)) {
+    return undefined;
+  }
+  return literalValueFromExpression(ts, statement.expression);
+}
+
 function extractParams(
   ts: TS,
   params: TypeScript.NodeArray<TypeScript.ParameterDeclaration>,
@@ -66,12 +99,20 @@ function extractFromFunctionDeclaration(
   ts: TS,
   node: TypeScript.FunctionDeclaration,
   checker: TypeScript.TypeChecker,
-  exportedNames: Set<string>
+  exportedNames: Set<string>,
+  options: {
+    name?: string;
+    importName?: string;
+    callExpression?: string;
+    overloadIndex?: number;
+  } = {}
 ): FunctionSignature | null {
   const defaultExport = isDefaultExport(ts, node);
-  const name = node.name?.text ?? (defaultExport ? 'defaultExport' : undefined);
+  const baseName = node.name?.text ?? (defaultExport ? 'defaultExport' : undefined);
+  const name = options.name ?? baseName;
   if (!name) return null;
-  if (!isNodeExported(ts, node) && !exportedNames.has(name)) return null;
+  if (!baseName) return null;
+  if (!isNodeExported(ts, node) && !exportedNames.has(baseName)) return null;
 
   const signature = checker.getSignatureFromDeclaration(node);
   const returnType = node.type
@@ -82,8 +123,11 @@ function extractFromFunctionDeclaration(
 
   return {
     name,
-    importName: name,
+    importName: options.importName ?? baseName,
     exportKind: defaultExport ? 'default' : 'named',
+    callExpression: options.callExpression,
+    overloadIndex: options.overloadIndex,
+    literalReturnValue: literalReturnValueFromBody(ts, node.body),
     params: extractParams(ts, node.parameters, checker),
     returnType: returnType.replace(/\s+/g, ' ').trim(),
     isAsync:
@@ -152,6 +196,7 @@ function signatureFromFunctionLike(
     importName: options.importName,
     exportKind: options.exportKind,
     callExpression: options.callExpression,
+    literalReturnValue: literalReturnValueFromBody(ts, fn.body),
     params: extractParams(ts, fn.parameters, checker),
     returnType: returnType.replace(/\s+/g, ' ').trim(),
     isAsync:
@@ -224,13 +269,13 @@ function extractFromClassDeclaration(
     const methodName = propertyNameToString(ts, member.name);
     if (!methodName) continue;
     results.push(
-        signatureFromFunctionLike(ts, member, checker, {
-          name: `${className}.${methodName}`,
-          importName: className,
-          exportKind,
-          callExpression: `${className}.${methodName}`,
-          jsdocNode: member,
-        })
+      signatureFromFunctionLike(ts, member, checker, {
+        name: `${className}.${methodName}`,
+        importName: className,
+        exportKind,
+        callExpression: `${className}.${methodName}`,
+        jsdocNode: member,
+      })
     );
   }
 
@@ -298,11 +343,144 @@ function collectLocalExportNames(ts: TS, sourceFile: TypeScript.SourceFile): Set
   return exportedNames;
 }
 
-export async function extractFunctionsFromTypeScript(
-  filePath: string
+function resolveModulePath(filePath: string, moduleSpecifier: string): string | undefined {
+  if (!moduleSpecifier.startsWith('.')) return undefined;
+  const base = resolve(dirname(filePath), moduleSpecifier);
+  const candidates = [
+    base,
+    `${base}.ts`,
+    `${base}.tsx`,
+    `${base}.js`,
+    `${base}.jsx`,
+    resolve(base, 'index.ts'),
+    resolve(base, 'index.tsx'),
+    resolve(base, 'index.js'),
+    resolve(base, 'index.jsx'),
+  ];
+  return candidates.find((candidate) => existsSync(candidate));
+}
+
+function reexportedSignature(
+  sig: FunctionSignature,
+  exportedName: string,
+  alias: string
+): FunctionSignature {
+  if (sig.name === exportedName) {
+    return {
+      ...sig,
+      name: alias,
+      importName: alias,
+      exportKind: 'named',
+      callExpression: alias,
+    };
+  }
+
+  if (sig.importName === exportedName && sig.callExpression?.startsWith(`${exportedName}.`)) {
+    return {
+      ...sig,
+      name: sig.name.replace(exportedName, alias),
+      importName: alias,
+      exportKind: 'named',
+      callExpression: sig.callExpression.replace(exportedName, alias),
+    };
+  }
+
+  if (sig.importName === exportedName && sig.callExpression === exportedName) {
+    return {
+      ...sig,
+      name: sig.name.replace(exportedName, alias),
+      importName: alias,
+      exportKind: 'named',
+      callExpression: alias,
+    };
+  }
+
+  return {
+    ...sig,
+    exportKind: 'named',
+  };
+}
+
+function namespaceReexportedSignature(sig: FunctionSignature, alias: string): FunctionSignature {
+  const targetCall = sig.callExpression ?? sig.name;
+  return {
+    ...sig,
+    name: `${alias}.${sig.name}`,
+    importName: alias,
+    exportKind: 'named',
+    callExpression: `${alias}.${targetCall}`,
+  };
+}
+
+async function extractFromReExportDeclaration(
+  ts: TS,
+  filePath: string,
+  node: TypeScript.ExportDeclaration,
+  visited: Set<string>
 ): Promise<FunctionSignature[]> {
+  if (!node.moduleSpecifier || !ts.isStringLiteral(node.moduleSpecifier)) return [];
+  const targetPath = resolveModulePath(filePath, node.moduleSpecifier.text);
+  if (!targetPath) return [];
+
+  const targetSigs = await extractFunctionsFromTypeScript(targetPath, visited);
+  const clause = node.exportClause;
+  if (!clause) {
+    return targetSigs.filter((sig) => sig.exportKind !== 'default');
+  }
+  if (ts.isNamespaceExport(clause)) {
+    return targetSigs
+      .filter((sig) => sig.exportKind !== 'default')
+      .map((sig) => namespaceReexportedSignature(sig, clause.name.text));
+  }
+  if (!ts.isNamedExports(clause)) return [];
+
+  const results: FunctionSignature[] = [];
+  for (const element of clause.elements) {
+    const exportedName = element.propertyName?.text ?? element.name.text;
+    const alias = element.name.text;
+    const matches = targetSigs.filter((sig) =>
+      exportedName === 'default'
+        ? sig.exportKind === 'default'
+        : sig.name === exportedName || sig.importName === exportedName
+    );
+    results.push(...matches.map((sig) => reexportedSignature(sig, exportedName, alias)));
+  }
+  return results;
+}
+
+function collectOverloadedFunctionNames(
+  ts: TS,
+  sourceFile: TypeScript.SourceFile,
+  exportedNames: Set<string>
+): Set<string> {
+  const overloaded = new Set<string>();
+  const declarationCounts = new Map<string, number>();
+
+  for (const statement of sourceFile.statements) {
+    if (!ts.isFunctionDeclaration(statement) || !statement.name) continue;
+    if (statement.body) continue;
+    const name = statement.name.text;
+    if (!isNodeExported(ts, statement) && !exportedNames.has(name)) continue;
+    declarationCounts.set(name, (declarationCounts.get(name) ?? 0) + 1);
+  }
+
+  for (const [name, count] of declarationCounts) {
+    if (count > 0) overloaded.add(name);
+  }
+
+  return overloaded;
+}
+
+export async function extractFunctionsFromTypeScript(
+  filePath: string,
+  visited: Set<string> = new Set()
+): Promise<FunctionSignature[]> {
+  const absolutePath = resolve(filePath);
+  if (visited.has(absolutePath)) return [];
+  visited.add(absolutePath);
+
   const ts: TS = await import('typescript');
-  const program = ts.createProgram([filePath], {
+  const program = ts.createProgram([absolutePath], {
     target: ts.ScriptTarget.ES2022,
     module: ts.ModuleKind.NodeNext,
     moduleResolution: ts.ModuleResolutionKind.NodeNext,
@@ -310,16 +488,33 @@ export async function extractFunctionsFromTypeScript(
     allowJs: true,
     checkJs: false,
   });
-  const sourceFile = program.getSourceFile(filePath);
+  const sourceFile = program.getSourceFile(absolutePath);
   if (!sourceFile) throw new Error(`testgen: could not open source file: ${filePath}`);
 
   const checker = program.getTypeChecker();
   const results: FunctionSignature[] = [];
   const exportedNames = collectLocalExportNames(ts, sourceFile);
+  const overloadedFunctionNames = collectOverloadedFunctionNames(ts, sourceFile, exportedNames);
+  const overloadIndexes = new Map<string, number>();
 
   ts.forEachChild(sourceFile, (node) => {
     if (ts.isFunctionDeclaration(node)) {
-      const sig = extractFromFunctionDeclaration(ts, node, checker, exportedNames);
+      const baseName = node.name?.text;
+      if (baseName && overloadedFunctionNames.has(baseName) && node.body) return;
+      const overloadIndex =
+        baseName && overloadedFunctionNames.has(baseName)
+          ? (overloadIndexes.get(baseName) ?? 0) + 1
+          : undefined;
+      if (baseName && overloadIndex !== undefined) overloadIndexes.set(baseName, overloadIndex);
+      const sig = extractFromFunctionDeclaration(ts, node, checker, exportedNames, {
+        name:
+          baseName && overloadIndex !== undefined
+            ? `${baseName} overload ${overloadIndex}`
+            : undefined,
+        importName: baseName,
+        callExpression: baseName && overloadIndex !== undefined ? baseName : undefined,
+        overloadIndex,
+      });
       if (sig) results.push(sig);
     } else if (ts.isVariableStatement(node)) {
       results.push(...extractFromVariableStatement(ts, node, checker, exportedNames));
@@ -329,6 +524,12 @@ export async function extractFunctionsFromTypeScript(
       results.push(...extractFromNamespaceDeclaration(ts, node, checker, exportedNames));
     }
   });
+
+  for (const statement of sourceFile.statements) {
+    if (ts.isExportDeclaration(statement) && statement.moduleSpecifier) {
+      results.push(...(await extractFromReExportDeclaration(ts, absolutePath, statement, visited)));
+    }
+  }
 
   return results;
 }

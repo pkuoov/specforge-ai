@@ -49,17 +49,16 @@ node packages/core/bin/testgen.js examples/basic-function/clamp.ts --merge
 
 ## Current phase
 
-P0 is complete. P1 is in progress. Core and TypeScript packages are available. The core CLI writes standard Vitest tests, supports directory targets, respects JSON config, refuses overwrites by default, supports safe merge blocks, prefers TypeScript AST extraction when available, supports default function exports/default class static methods/namespace functions/object-exported functions, uses simple JSDoc examples as concrete expected values, and runs Vitest by default. The TypeScript package adds deeper AST extraction and fast-check property test generation.
+P0 is complete. P1 is mostly complete. Core and TypeScript packages are available. The core CLI writes standard Vitest tests, supports directory targets, respects JSON config, refuses overwrites by default, supports safe merge blocks, prefers TypeScript AST extraction when available, supports default function exports/default class static methods/cross-file named and namespace re-exports/top-level overload signatures/namespace functions/object-exported functions, uses simple JSDoc examples and literal returns as concrete expected values, generates inline object and common domain-shaped fixtures, and runs Vitest by default. The TypeScript package adds deeper AST extraction and fast-check property test generation.
 
 ## P1/P2 implementation queue
 
-P1 should continue production-grade generated tests:
+P1 should finish the remaining production-grade generated-test refinements:
 
-1. Improve expected values using literals and simple implementation cues.
-2. Expand behavioral contract patterns for parse, get, and date utilities.
-3. Support cross-file re-exports, overload-specific cases, and namespace re-export forms.
-4. Add fixture generation for object parameters and domain-shaped values.
-5. Add a snapshot/update workflow around generated regions.
+1. Refine domain-shaped fixtures with project-local type/interface field extraction.
+2. Support class/interface overload forms.
+3. Expand behavioral contract patterns for additional domain utilities.
+4. Refine generated-region update UX beyond the current `--merge` marker workflow.
 
 P2 should broaden integrations:
 

@@ -37,6 +37,19 @@ describe('extractFunctionsFromTypeScript', () => {
     expect(sigs.map((sig) => sig.name)).toEqual(['isReady']);
   });
 
+  it('extracts simple literal return hints', async () => {
+    const sourcePath = writeTempSource(
+      'export function answer(): number { return 42; }\nexport const status = () => "ok";\n'
+    );
+
+    const sigs = await extractFunctionsFromTypeScript(sourcePath);
+
+    expect(sigs.map((sig) => [sig.name, sig.literalReturnValue])).toEqual([
+      ['answer', 42],
+      ['status', 'ok'],
+    ]);
+  });
+
   it('extracts static class methods and object-exported functions', async () => {
     const sourcePath = writeTempSource(`
       export class Calculator {
@@ -87,5 +100,63 @@ describe('extractFunctionsFromTypeScript', () => {
       'Calculator.add',
       'strings.normalize',
     ]);
+  });
+
+  it('extracts named cross-file re-exports', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'testgen-ts-extractor-'));
+    const mathPath = join(dir, 'math.ts');
+    const indexPath = join(dir, 'index.ts');
+    writeFileSync(mathPath, `
+      export function add(a: number, b: number): number { return a + b; }
+      export class Calculator {
+        static max(values: number[]): number { return Math.max(...values); }
+      }
+    `);
+    writeFileSync(indexPath, "export { add as sum, Calculator as Calc } from './math';\n");
+
+    const sigs = await extractFunctionsFromTypeScript(indexPath);
+
+    expect(sigs.map((sig) => sig.name)).toEqual(['sum', 'Calc.max']);
+    expect(sigs.map((sig) => sig.importName)).toEqual(['sum', 'Calc']);
+    expect(sigs.map((sig) => sig.callExpression)).toEqual(['sum', 'Calc.max']);
+  });
+
+  it('extracts namespace cross-file re-exports', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'testgen-ts-extractor-'));
+    const mathPath = join(dir, 'math.ts');
+    const indexPath = join(dir, 'index.ts');
+    writeFileSync(mathPath, `
+      export function add(a: number, b: number): number { return a + b; }
+      export class Calculator {
+        static max(values: number[]): number { return Math.max(...values); }
+      }
+    `);
+    writeFileSync(indexPath, "export * as math from './math';\n");
+
+    const sigs = await extractFunctionsFromTypeScript(indexPath);
+
+    expect(sigs.map((sig) => sig.name)).toEqual(['math.add', 'math.Calculator.max']);
+    expect(sigs.map((sig) => sig.importName)).toEqual(['math', 'math']);
+    expect(sigs.map((sig) => sig.callExpression)).toEqual(['math.add', 'math.Calculator.max']);
+  });
+
+  it('extracts top-level overload signatures as separate cases', async () => {
+    const sourcePath = writeTempSource(`
+      export function parseValue(value: string): number;
+      export function parseValue(value: number): number;
+      export function parseValue(value: string | number): number {
+        return Number(value);
+      }
+    `);
+
+    const sigs = await extractFunctionsFromTypeScript(sourcePath);
+
+    expect(sigs.map((sig) => sig.name)).toEqual([
+      'parseValue overload 1',
+      'parseValue overload 2',
+    ]);
+    expect(sigs.map((sig) => sig.callExpression)).toEqual(['parseValue', 'parseValue']);
+    expect(sigs.map((sig) => sig.params[0]?.type)).toEqual(['string', 'number']);
+    expect(sigs.map((sig) => sig.overloadIndex)).toEqual([1, 2]);
   });
 });

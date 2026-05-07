@@ -44,15 +44,16 @@ testgen is currently usable as a P0 autotest assistant for exported TypeScript/J
 - It supports invalid-input policy selection with `no-throw`, `throw`, or `skip`.
 - It prefers TypeScript AST extraction when TypeScript is available, then falls back to regex extraction.
 - It can merge generated output into a protected `// <testgen:generated>` block with `--merge`.
-- It supports default function exports, local export specifiers, static class methods, and object-exported functions in AST mode.
-- It includes behavioral contracts for predicates, validators, grouping helpers, uniqueness helpers, and min/max/average utilities.
-- It can turn simple JSDoc examples such as `@example add(1, 2) => 3` into concrete `toEqual` happy-path tests.
+- It supports default function exports, default class static methods, local export specifiers, cross-file named re-exports, namespace re-exports, top-level overload signatures, namespace functions, class static methods, and object-exported functions in AST mode.
+- It includes behavioral contracts for predicates, validators, parse/get/date/format/create helpers, grouping helpers, uniqueness helpers, and min/max/average utilities.
+- It can turn simple JSDoc examples such as `@example add(1, 2) => 3` and literal returns such as `return 42` into concrete `toEqual` happy-path tests.
+- It generates simple object fixtures from inline object parameter types and common domain type names such as `User`, `Order`, `Config`, and `Date`.
 - It includes Claude Code and Codex skill definitions.
 - It includes CI checks for typecheck, tests, build, dogfood generation, public audit, and package pack checks.
 
 Known limits:
 
-- React components, API routes, overload-specific cases, default class exports, cross-file re-exports, and complex module shapes need P1/P2 work.
+- React components, API routes, class/interface overload forms, and complex module shapes need P1/P2 work.
 - `testgen.config.ts` is not supported yet; config is JSON-only to avoid runtime loader dependencies.
 
 ---
@@ -289,11 +290,14 @@ Status: in progress.
 - [x] Expand behavioral contracts for predicate, validate, groupBy, unique, min/max, and average utilities
 - [x] Support default function exports, default class static methods, local export specifiers, namespace functions, class static methods, and object-exported functions
 - [x] Use simple JSDoc examples as concrete expected values
-- [ ] Improve expected values using literals and simple implementation cues
-- [ ] Expand behavioral contracts for parse, get*, and date utilities
-- [ ] Support cross-file named re-exports, overload-specific cases, and namespace re-export forms
-- [ ] Add fixture generation for object parameters and domain-shaped values
-- [ ] Add snapshot/update workflow for generated regions
+- [x] Improve expected values using simple literal return cues
+- [x] Expand behavioral contracts for parse, get*, and date utilities
+- [x] Support cross-file named re-exports
+- [x] Add fixture generation for inline object parameters and common domain-shaped values
+- [x] Add generated-region update workflow through `--merge` markers
+- [x] Support top-level overload-specific cases and namespace re-export forms
+- [ ] Refine domain-shaped fixtures with project-local type/interface field extraction
+- [ ] Support class/interface overload forms
 
 ### P2 — Broader framework and CI integration
 

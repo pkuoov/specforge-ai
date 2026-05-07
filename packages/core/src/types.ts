@@ -20,6 +20,8 @@ export interface FunctionSignature {
   importName?: string;
   exportKind?: 'named' | 'default';
   callExpression?: string;
+  overloadIndex?: number;
+  literalReturnValue?: unknown;
   params: FunctionParam[];
   returnType: string;
   isAsync: boolean;

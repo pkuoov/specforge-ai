@@ -80,11 +80,11 @@ Behavioral mirror examples:
 
 ## Current Phase
 
-P0 is complete. P1 is in progress: single-file and directory generation, JSON config, overwrite protection, safe merge blocks, AST-first extraction with regex fallback, default function exports, default class static methods, namespace functions, object-exported functions, simple JSDoc example expected values, real runner results, invalid-input policies, and expanded behavioral contracts are implemented.
+P0 is complete. P1 is mostly complete: single-file and directory generation, JSON config, overwrite protection, safe merge blocks, AST-first extraction with regex fallback, default function exports, default class static methods, cross-file named and namespace re-exports, top-level overload signatures, namespace functions, object-exported functions, simple JSDoc/literal expected values, inline object and common domain-shaped fixtures, real runner results, invalid-input policies, and expanded behavioral contracts are implemented.
 
 Next planned work:
 
-- P1 remaining: better expected values, parse/get/date contract patterns, cross-file re-export support, fixtures, and generated-region update workflow.
+- P1 remaining: project-local type/interface fixture extraction, class/interface overload forms, additional domain utility contracts, and generated-region update UX refinements.
 - P2 remaining: React/API route generation, Jest/Bun/Node runner support, mutation testing, coverage delta, and `testgen.config.ts`. CI, public audit, dogfood generation, and package pack checks are implemented.
 
 ## Dependency Hint

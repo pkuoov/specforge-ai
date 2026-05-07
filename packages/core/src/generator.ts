@@ -1,5 +1,24 @@
 import type { FunctionSignature, InvalidInputStrategy, TestCase, TestPlan } from './types.js';
 
+const codeExpressionBrand = '__testgenExpression';
+
+export interface CodeExpression {
+  __testgenExpression: string;
+}
+
+export function isCodeExpression(value: unknown): value is CodeExpression {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    codeExpressionBrand in value &&
+    typeof (value as Record<string, unknown>)[codeExpressionBrand] === 'string'
+  );
+}
+
+export function codeExpression(expression: string): CodeExpression {
+  return { [codeExpressionBrand]: expression };
+}
+
 function boundaryValuesForType(type: string): unknown[] {
   const t = type.toLowerCase().replace(/\s/g, '');
   const unique = (values: unknown[]) => {
@@ -18,6 +37,9 @@ function boundaryValuesForType(type: string): unknown[] {
   if (t.includes('[]') || t.includes('array')) {
     return unique([[], [null], [undefined], null, undefined]);
   }
+  if (t.includes('{}') || t.includes('object') || t.includes('record') || t.startsWith('{')) {
+    return unique([{}, { key: null }, null, undefined]);
+  }
   if (t.includes('string')) {
     return unique(['', ' ', 'a', 'a'.repeat(1000), null, undefined]);
   }
@@ -27,9 +49,6 @@ function boundaryValuesForType(type: string): unknown[] {
   if (t.includes('boolean')) {
     return unique([true, false, null, undefined]);
   }
-  if (t.includes('{}') || t.includes('object') || t.includes('record')) {
-    return unique([{}, { key: null }, null, undefined]);
-  }
   // unknown / any — probe a spread
   return unique([null, undefined, '', 0, [], {}]);
 }
@@ -38,7 +57,13 @@ function happyValueForType(type: string, paramName: string): unknown {
   const t = type.toLowerCase().replace(/\s/g, '');
   const n = paramName.toLowerCase();
 
+  if (/\bdate\b/i.test(type)) return codeExpression('new Date("2024-01-02T00:00:00.000Z")');
+  if (/\berror\b/i.test(type)) return codeExpression('new Error("test error")');
   if (t.includes('[]') || t.includes('array')) return [1, 2, 3];
+  const objectFixture = fixtureForObjectType(type);
+  if (objectFixture !== undefined) return objectFixture;
+  const domainFixture = fixtureForDomainType(type, paramName);
+  if (domainFixture !== undefined) return domainFixture;
   if (t.includes('string')) {
     if (n.includes('name')) return 'Alice';
     if (n.includes('email')) return 'alice@example.com';
@@ -54,6 +79,115 @@ function happyValueForType(type: string, paramName: string): unknown {
   }
   if (t.includes('boolean')) return true;
   return {};
+}
+
+function splitTopLevel(raw: string, separators: string[]): string[] {
+  const parts: string[] = [];
+  let current = '';
+  let quote: string | undefined;
+  let depth = 0;
+
+  for (const char of raw) {
+    if (quote) {
+      current += char;
+      if (char === quote) quote = undefined;
+      continue;
+    }
+
+    if (char === '"' || char === "'") {
+      quote = char;
+      current += char;
+      continue;
+    }
+
+    if (char === '<' || char === '[' || char === '{' || char === '(') depth += 1;
+    if (char === '>' || char === ']' || char === '}' || char === ')') depth -= 1;
+
+    if (depth === 0 && separators.includes(char)) {
+      if (current.trim()) parts.push(current.trim());
+      current = '';
+      continue;
+    }
+
+    current += char;
+  }
+
+  if (current.trim()) parts.push(current.trim());
+  return parts;
+}
+
+function fixtureForObjectType(type: string): Record<string, unknown> | undefined {
+  const trimmed = type.trim();
+  if (/^Record\s*</.test(trimmed)) return { key: 'value' };
+  if (!trimmed.startsWith('{') || !trimmed.endsWith('}')) return undefined;
+
+  const body = trimmed.slice(1, -1).trim();
+  if (!body) return {};
+  const fixture: Record<string, unknown> = {};
+
+  for (const field of splitTopLevel(body, [';', ','])) {
+    const match = field.match(/^([A-Za-z_$][\w$]*)(\?)?\s*:\s*(.+)$/);
+    if (!match) continue;
+    const [, name, , fieldType] = match;
+    if (!name || !fieldType) continue;
+    fixture[name] = happyValueForType(fieldType, name);
+  }
+
+  return Object.keys(fixture).length > 0 ? fixture : {};
+}
+
+function fixtureForDomainType(type: string, paramName: string): Record<string, unknown> | undefined {
+  const hint = `${type} ${paramName}`.toLowerCase();
+
+  if (/(user|customer|account|profile|member|author|owner)/.test(hint)) {
+    return {
+      id: 'user-123',
+      name: 'Alice',
+      email: 'alice@example.com',
+    };
+  }
+
+  if (/(order|invoice|payment|checkout|subscription)/.test(hint)) {
+    return {
+      id: 'order-123',
+      total: 42,
+      status: 'paid',
+    };
+  }
+
+  if (/(product|item|sku|catalog)/.test(hint)) {
+    return {
+      id: 'product-123',
+      name: 'Widget',
+      price: 42,
+    };
+  }
+
+  if (/(config|options|settings|preferences)/.test(hint)) {
+    return {
+      enabled: true,
+      retries: 3,
+      mode: 'test',
+    };
+  }
+
+  if (/(request|response|route|endpoint)/.test(hint)) {
+    return {
+      id: 'request-123',
+      method: 'GET',
+      url: 'https://example.com',
+    };
+  }
+
+  if (/(event|message|notification|log)/.test(hint)) {
+    return {
+      id: 'event-123',
+      type: 'test',
+      timestamp: '2024-01-02T00:00:00.000Z',
+    };
+  }
+
+  return undefined;
 }
 
 function splitArgs(raw: string): string[] {
@@ -160,6 +294,17 @@ function generateHappyPath(sig: FunctionSignature): TestCase[] {
   if (example) return [example];
 
   const inputs = sig.params.map((p) => happyValueForType(p.type, p.name));
+  if (sig.literalReturnValue !== undefined) {
+    return [
+      {
+        strategy: 'happy-path',
+        description: 'returns the implementation literal for valid inputs',
+        inputs,
+        expectation: { type: 'return', value: sig.literalReturnValue },
+      },
+    ];
+  }
+
   return [
     {
       strategy: 'happy-path',
@@ -213,6 +358,9 @@ function generateBehavioralMirror(sig: FunctionSignature): TestCase[] {
   const ret = sig.returnType.toLowerCase();
   const arrayParamIndex = sig.params.findIndex((p) => p.type.includes('[]') || p.type.toLowerCase().includes('array'));
   const hasArrayParam = arrayParamIndex !== -1;
+  const firstParam = sig.params[0];
+  const normalizedReturn = sig.returnType.toLowerCase().replace(/\s/g, '');
+  const normalizedFirstParam = firstParam?.type.toLowerCase().replace(/\s/g, '');
 
   const inputsForBehavior = (overrides: Record<number, unknown> = {}) =>
     sig.params.map((p, index) =>
@@ -230,8 +378,11 @@ function generateBehavioralMirror(sig: FunctionSignature): TestCase[] {
     });
   }
 
-  // Idempotency: f(f(x)) === f(x) for pure transforms
-  if (name.includes('format') || name.includes('normalize') || name.includes('sanitize') || name.includes('trim')) {
+  // Idempotency: f(f(x)) === f(x) only when the output can safely feed the input.
+  if (
+    normalizedFirstParam === normalizedReturn &&
+    (name.includes('normalize') || name.includes('sanitize') || name.includes('trim'))
+  ) {
     const inputs = inputsForBehavior();
     cases.push({
       strategy: 'behavioral-mirror',
@@ -270,6 +421,61 @@ function generateBehavioralMirror(sig: FunctionSignature): TestCase[] {
       description: 'returns a boolean result',
       inputs: inputsForBehavior(),
       expectation: { type: 'property', pattern: 'boolean-return' },
+    });
+  }
+
+  if (name.includes('parse')) {
+    const pattern =
+      ret.includes('date') ? 'date-return' :
+      ret.includes('object') || ret.includes('{') || ret.includes('record') ? 'object-return' :
+      ret.includes('number') ? 'number-return' :
+      ret.includes('string') ? 'string-return' :
+      ret.includes('boolean') ? 'boolean-return' :
+      'defined';
+    cases.push({
+      strategy: 'behavioral-mirror',
+      description: 'returns a parsed value with the expected shape',
+      inputs: inputsForBehavior(),
+      expectation: { type: 'property', pattern },
+    });
+  }
+
+  if (ret.includes('date') || /^parse.*date/.test(name) || /^to.*date/.test(name) || /^create.*date/.test(name)) {
+    cases.push({
+      strategy: 'behavioral-mirror',
+      description: 'returns a Date value',
+      inputs: inputsForBehavior(),
+      expectation: { type: 'property', pattern: 'date-return' },
+    });
+  }
+
+  if (name.startsWith('get')) {
+    cases.push({
+      strategy: 'behavioral-mirror',
+      description: 'returns a defined value for an existing lookup',
+      inputs: inputsForBehavior(),
+      expectation: { type: 'property', pattern: 'defined' },
+    });
+  }
+
+  if (
+    (name.startsWith('create') || name.startsWith('build') || name.startsWith('make')) &&
+    (ret.includes('object') || ret.includes('{') || /^[A-Z]/.test(sig.returnType))
+  ) {
+    cases.push({
+      strategy: 'behavioral-mirror',
+      description: 'returns a created object result',
+      inputs: inputsForBehavior(),
+      expectation: { type: 'property', pattern: 'object-return' },
+    });
+  }
+
+  if (name.includes('serialize') || name.includes('tostring') || name.startsWith('format')) {
+    cases.push({
+      strategy: 'behavioral-mirror',
+      description: 'returns a string representation',
+      inputs: inputsForBehavior(),
+      expectation: { type: 'property', pattern: 'string-return' },
     });
   }
 

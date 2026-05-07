@@ -135,4 +135,87 @@ describe('renderTestFile', () => {
     expect(source).toContain('matches documented example');
     expect(source).toContain('expect(add(1, 2)).toEqual(3);');
   });
+
+  it('uses implementation literal hints as concrete happy-path expectations', () => {
+    const sig: FunctionSignature = {
+      name: 'answer',
+      params: [],
+      returnType: 'number',
+      literalReturnValue: 42,
+      isAsync: false,
+      isExported: true,
+    };
+    const plan = generateTestPlan(sig, './answer');
+    const source = renderTestFile([plan], [sig], './answer');
+
+    expect(source).toContain('returns the implementation literal for valid inputs');
+    expect(source).toContain('expect(answer()).toEqual(42);');
+  });
+
+  it('renders object fixtures and parse/get/date contracts', () => {
+    const sigs: FunctionSignature[] = [
+      {
+        name: 'parseUser',
+        params: [{ name: 'raw', type: 'string', optional: false }],
+        returnType: '{ id: string; count: number }',
+        isAsync: false,
+        isExported: true,
+      },
+      {
+        name: 'getUserName',
+        params: [
+          {
+            name: 'user',
+            type: '{ id: string; name: string; visits: number }',
+            optional: false,
+          },
+        ],
+        returnType: 'string',
+        isAsync: false,
+        isExported: true,
+      },
+      {
+        name: 'parseDate',
+        params: [{ name: 'input', type: 'string', optional: false }],
+        returnType: 'Date',
+        isAsync: false,
+        isExported: true,
+      },
+    ];
+    const plans = sigs.map((sig) => generateTestPlan(sig, './users', { invalidInputStrategy: 'skip' }));
+    const source = renderTestFile(plans, sigs, './users');
+
+    expect(source).toContain('expect(typeof result).toBe(\'object\');');
+    expect(source).toContain('getUserName({ id: "abc-123", name: "Alice", visits: 42 })');
+    expect(source).toContain('returns a defined value for an existing lookup');
+    expect(source).toContain('expect(result instanceof Date).toBe(true);');
+  });
+
+  it('renders domain-shaped fixtures and Date inputs', () => {
+    const sigs: FunctionSignature[] = [
+      {
+        name: 'createUserSummary',
+        params: [{ name: 'user', type: 'User', optional: false }],
+        returnType: 'UserSummary',
+        isAsync: false,
+        isExported: true,
+      },
+      {
+        name: 'formatDate',
+        params: [{ name: 'value', type: 'Date', optional: false }],
+        returnType: 'string',
+        isAsync: false,
+        isExported: true,
+      },
+    ];
+    const plans = sigs.map((sig) => generateTestPlan(sig, './domain', { invalidInputStrategy: 'skip' }));
+    const source = renderTestFile(plans, sigs, './domain');
+
+    expect(source).toContain('createUserSummary({ id: "user-123", name: "Alice", email: "alice@example.com" })');
+    expect(source).toContain('returns a created object result');
+    expect(source).toContain('formatDate(new Date("2024-01-02T00:00:00.000Z"))');
+    expect(source).toContain('returns a string representation');
+    expect(source).not.toContain('formatDate(once as any)');
+    expect(source).not.toContain('expect(result instanceof Date).toBe(true);');
+  });
 });
